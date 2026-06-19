@@ -9,7 +9,13 @@ from google.cloud import bigquery
 from pydantic import BaseModel, ConfigDict
 
 from retail_agent.config import get_settings
-from retail_agent.const import ALLOWED_TABLES, BIGQUERY_JOB_TIMEOUT_MS, MAX_BIGQUERY_BYTES_BILLED, THELOOK_PROJECT
+from retail_agent.const import (
+    BIGQUERY_JOB_TIMEOUT_MS,
+    MAX_BIGQUERY_BYTES_BILLED,
+    THELOOK_DATASET,
+    THELOOK_PROJECT,
+    THELOOK_TABLES,
+)
 from retail_agent.exceptions import BigQueryExecutionError
 
 
@@ -66,11 +72,12 @@ def introspect_schema() -> dict[str, list[ColumnSchema]]:
 
     client = get_client()
     schema: dict[str, list[ColumnSchema]] = {}
-    for ds_table in sorted(ALLOWED_TABLES):
+    for table_name in sorted(THELOOK_TABLES):
+        ds_table = f"{THELOOK_DATASET}.{table_name}"
         ref = f"{THELOOK_PROJECT}.{ds_table}"
         try:
-            table = client.get_table(ref)
+            table_schema = client.get_table(ref)
         except gax_exceptions.GoogleAPIError as exc:
             raise BigQueryExecutionError(f"schema introspection failed for {ref}: {exc}") from exc
-        schema[ds_table] = [ColumnSchema(name=field.name, data_type=field.field_type) for field in table.schema]
+        schema[ds_table] = [ColumnSchema(name=field.name, data_type=field.field_type) for field in table_schema.schema]
     return schema

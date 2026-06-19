@@ -81,6 +81,8 @@ def _default_state(state: AgentState) -> AgentState:
         "sql": None,
         "validation_error": None,
         "masked_result_rows": [],
+        "result_total_rows": None,
+        "result_truncated": False,
         "report": None,
         "scrubbed_report": None,
         "self_correct_count": 0,
@@ -251,6 +253,8 @@ def _build_nodes(dependencies: AgentDependencies) -> dict[str, Callable[[AgentSt
             return {"last_error": str(exc)}
         return {
             "masked_result_rows": _frame_to_rows(execution.masked_frame),
+            "result_total_rows": execution.total_rows,
+            "result_truncated": execution.truncated,
             "bq_bytes": execution.estimated_bytes,
             "last_error": None,
         }
@@ -275,6 +279,8 @@ def _build_nodes(dependencies: AgentDependencies) -> dict[str, Callable[[AgentSt
                 masked_df,
                 model,
                 config=_callback_config(collector),
+                truncated=state.get("result_truncated", False),
+                total_rows=state.get("result_total_rows"),
             )
         except (openai.OpenAIError, RuntimeError, TimeoutError, ValueError) as exc:
             return {"outcome": AgentOutcome.FAILED, "last_error": str(exc), "report": FAILED_RESPONSE}

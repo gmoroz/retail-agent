@@ -93,7 +93,9 @@ def _dependencies_for_model(chat_model: object, query_result: pd.DataFrame) -> A
         retrieval_service=_retrieval_service(),
         schema_service=_schema_service(),
         query_execution_service=_query_execution_service(query_result),
-        report_generator=lambda question, df, chat_model, *, config=None: f"Report rows: {len(df)}",
+        report_generator=lambda question, df, chat_model, *, config=None, truncated=False, total_rows=None: (
+            f"Report rows: {len(df)}"
+        ),
     )
 
 
@@ -190,7 +192,9 @@ def test_graph_masks_question_when_golden_retrieval_fails(settings: object) -> N
             ),
             schema_service=_schema_service(),
             query_execution_service=_query_execution_service(pd.DataFrame({"total_orders": [42]})),
-            report_generator=lambda question, df, chat_model, *, config=None: "Report rows: 1",
+            report_generator=lambda question, df, chat_model, *, config=None, truncated=False, total_rows=None: (
+                "Report rows: 1"
+            ),
         ),
         use_checkpointer=False,
     )
@@ -205,7 +209,15 @@ def test_graph_sends_masked_question_to_sql_and_report_llms(settings: object) ->
     model = SequentialSqlModel([VALID_SQL])
     captured_report_question: dict[str, str] = {}
 
-    def capture_report(question: str, df: pd.DataFrame, chat_model: BaseChatModel, *, config: object = None) -> str:
+    def capture_report(
+        question: str,
+        df: pd.DataFrame,
+        chat_model: BaseChatModel,
+        *,
+        config: object = None,
+        truncated: bool = False,
+        total_rows: int | None = None,
+    ) -> str:
         captured_report_question["question"] = question
         return "Report rows: 1"
 
@@ -233,7 +245,15 @@ def test_graph_sends_masked_question_to_sql_and_report_llms(settings: object) ->
 def test_graph_persists_only_masked_result_rows_before_report(settings: object) -> None:
     captured: dict[str, pd.DataFrame] = {}
 
-    def capture_report(question: str, df: pd.DataFrame, chat_model: BaseChatModel, *, config: object = None) -> str:
+    def capture_report(
+        question: str,
+        df: pd.DataFrame,
+        chat_model: BaseChatModel,
+        *,
+        config: object = None,
+        truncated: bool = False,
+        total_rows: int | None = None,
+    ) -> str:
         captured["df"] = df
         return df.to_string(index=False)
 
@@ -257,6 +277,33 @@ def test_graph_persists_only_masked_result_rows_before_report(settings: object) 
     assert state["masked_result_rows"] == [{"email": "[redacted]", "total_spend": 42.0}]
     assert captured["df"]["email"].tolist() == ["[redacted]"]
     assert "jane@example.com" not in str(state)
+
+
+def test_graph_reports_truncated_result_rows(settings: object) -> None:
+    model = SequentialSqlModel([VALID_SQL, "Two visible rows are enough for a preview."])
+    graph = build_graph(
+        dependencies=AgentDependencies(
+            chat_model_builder=lambda: cast(BaseChatModel, model),
+            guard_classifier=_allow_guard,
+            retrieval_service=_retrieval_service(),
+            schema_service=_schema_service(),
+            query_execution_service=QueryExecutionService(
+                dry_run_estimator=lambda sql: 1024,
+                query_runner=lambda sql: pd.DataFrame({"order_id": [10, 20, 30], "orders": [1, 2, 3]}),
+                max_result_rows=2,
+            ),
+        ),
+        use_checkpointer=False,
+    )
+
+    state = graph.invoke({"question": "Show order rows"})
+
+    assert state["outcome"] == "ok"
+    assert state["masked_result_rows"] == [{"order_id": 10, "orders": 1}, {"order_id": 20, "orders": 2}]
+    assert state["result_total_rows"] == 3
+    assert state["result_truncated"]
+    assert "Only the first 2 of 3 rows are shown due to the safety row cap." in str(state["scrubbed_report"])
+    assert model.call_count == 2
 
 
 def test_graph_uses_fixed_self_correct_limit(settings: Settings) -> None:

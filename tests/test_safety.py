@@ -11,6 +11,7 @@ is driven through a mock chat model.
 import logging
 from unittest.mock import MagicMock
 
+import openai
 import pandas as pd
 import pytest
 from langchain_core.messages import AIMessage
@@ -204,16 +205,30 @@ def test_guard_allows_analytical_classification_only_verdict() -> None:
     assert decision.refusal is None
 
 
-def test_guard_falls_back_to_rule_based_when_verdict_is_invalid(caplog: pytest.LogCaptureFixture) -> None:
+def test_guard_blocks_when_verdict_is_invalid(caplog: pytest.LogCaptureFixture) -> None:
     model = MagicMock()
     model.invoke.return_value = AIMessage(content="not a verdict object")
     caplog.set_level(logging.WARNING, logger=safety.__name__)
 
     decision = classify_and_guard("Which product categories generated the most revenue?", model)
 
-    assert decision.allowed
-    assert decision.refusal is None
-    assert "guard verdict parsing failed" in caplog.text
+    assert not decision.allowed
+    assert decision.refusal == safety.GUARD_UNAVAILABLE_MESSAGE
+    assert decision.reason == "guard classification unavailable"
+    assert "guard classification unavailable" in caplog.text
+
+
+def test_guard_blocks_when_classifier_raises_openai_error(caplog: pytest.LogCaptureFixture) -> None:
+    model = MagicMock()
+    model.invoke.side_effect = openai.OpenAIError("classifier unavailable")
+    caplog.set_level(logging.WARNING, logger=safety.__name__)
+
+    decision = classify_and_guard("Which product categories generated the most revenue?", model)
+
+    assert not decision.allowed
+    assert decision.refusal == safety.GUARD_UNAVAILABLE_MESSAGE
+    assert decision.reason == "guard classification unavailable"
+    assert "guard classification unavailable" in caplog.text
 
 
 def test_guard_rule_blocks_injection_when_model_would_return_invalid_verdict() -> None:
@@ -256,13 +271,14 @@ def test_guard_verdict_accepts_provider_aliases() -> None:
     assert verdict.explanation == "customer spend question"
 
 
-def test_guard_falls_back_when_provider_rejects_json_response(caplog: pytest.LogCaptureFixture) -> None:
+def test_guard_blocks_when_provider_rejects_json_response(caplog: pytest.LogCaptureFixture) -> None:
     model = MagicMock()
     model.invoke.side_effect = ValueError("model features structured outputs not support")
     caplog.set_level(logging.WARNING, logger=safety.__name__)
 
     decision = classify_and_guard("Show completed revenue by month in 2024", model)
 
-    assert decision.allowed
-    assert decision.refusal is None
-    assert "guard verdict parsing failed" in caplog.text
+    assert not decision.allowed
+    assert decision.refusal == safety.GUARD_UNAVAILABLE_MESSAGE
+    assert decision.reason == "guard classification unavailable"
+    assert "guard classification unavailable" in caplog.text

@@ -16,13 +16,16 @@ from pydantic import BaseModel, ConfigDict
 THELOOK_PROJECT = "bigquery-public-data"
 THELOOK_DATASET = "thelook_ecommerce"
 
+THELOOK_TABLES: tuple[str, ...] = (
+    "orders",
+    "order_items",
+    "products",
+    "users",
+)
+
 ALLOWED_TABLES: frozenset[str] = frozenset(
-    {
-        f"{THELOOK_DATASET}.orders",
-        f"{THELOOK_DATASET}.order_items",
-        f"{THELOOK_DATASET}.products",
-        f"{THELOOK_DATASET}.users",
-    }
+    {f"{THELOOK_DATASET}.{table}" for table in THELOOK_TABLES}
+    | {f"{THELOOK_PROJECT}.{THELOOK_DATASET}.{table}" for table in THELOOK_TABLES}
 )
 
 PII_COLUMNS: dict[str, frozenset[str]] = {
@@ -62,6 +65,7 @@ EMBEDDING_REQUEST_TIMEOUT_SEC = 30.0
 
 MAX_SELF_CORRECT_ITERATIONS = 3
 MAX_BIGQUERY_BYTES_BILLED = 1_073_741_824
+MAX_RESULT_ROWS = 1_000
 BIGQUERY_JOB_TIMEOUT_MS = 60_000
 RETRIEVAL_TOP_K = 3
 LLM_MAX_RETRIES = 3

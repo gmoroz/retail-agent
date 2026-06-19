@@ -12,8 +12,8 @@ are never touched.
 
 ``classify_and_guard`` combines a cheap rule-based screen (prompt-injection and
 destructive-SQL phrases block without an LLM call) with an LLM intent classifier for
-off-topic and analytical questions; a blocked question yields a structured refusal
-rather than an exception.
+off-topic and analytical questions. If classifier output is unavailable or invalid,
+the guard fails closed with a structured refusal rather than proceeding on guesses.
 """
 
 import json
@@ -38,6 +38,7 @@ REFUSAL_MESSAGE = (
     "I can only answer analytical questions about the e-commerce data "
     "(orders, products, users). Please rephrase your question."
 )
+GUARD_UNAVAILABLE_MESSAGE = "I couldn't verify your request. Please rephrase it and try again."
 
 RULE_INJECTION_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
     re.compile(p, re.IGNORECASE)
@@ -193,7 +194,7 @@ def classify_and_guard(
     Prompt-injection and destructive-SQL phrases are blocked by cheap regex rules
     without calling the model; everything else is classified by the model. Returns a
     :class:`GuardDecision` (never raises): ``allowed`` is False with a polite refusal
-    for blocked or off-topic questions.
+    for blocked, off-topic or unverifiable questions.
     """
 
     rule_reason = _rule_block_reason(question)
@@ -220,7 +221,7 @@ def classify_and_guard(
         ValueError,
         TypeError,
     ) as exc:
-        return _fallback_guard_decision(question, exc)
+        return _fallback_guard_decision(exc)
     if verdict.is_prompt_injection:
         return GuardDecision(allowed=False, reason=f"injection: {verdict.explanation}", refusal=REFUSAL_MESSAGE)
     if verdict.is_off_topic or not verdict.is_analytical_data_question:
@@ -242,7 +243,6 @@ def _parse_guard_verdict(raw_verdict: object) -> GuardVerdict:
 
 
 def _fallback_guard_decision(
-    question: str,
     exc: openai.OpenAIError
     | ValidationError
     | json.JSONDecodeError
@@ -251,14 +251,15 @@ def _fallback_guard_decision(
     | ValueError
     | TypeError,
 ) -> GuardDecision:
-    rule_reason = _rule_block_reason(question)
-    if rule_reason is not None:
-        return GuardDecision(allowed=False, reason=rule_reason, refusal=REFUSAL_MESSAGE)
     logger.warning(
-        "guard verdict parsing failed; allowing rule-clean analytical fallback",
+        "guard classification unavailable",
         extra={"error_type": type(exc).__name__, "error": str(exc)},
     )
-    return GuardDecision(allowed=True, reason="analytical data question")
+    return GuardDecision(
+        allowed=False,
+        reason="guard classification unavailable",
+        refusal=GUARD_UNAVAILABLE_MESSAGE,
+    )
 
 
 def _mask_cell(value: object) -> object:

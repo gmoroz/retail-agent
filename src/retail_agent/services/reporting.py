@@ -22,18 +22,28 @@ REPORT_SYSTEM_PROMPT = (
 )
 
 REPORT_USER_TEMPLATE = "Question:\n{question}\n\nQuery result:\n{table}\n\nWrite the report for the manager."
+TRUNCATED_RESULT_TEMPLATE = "Only the first {shown_rows} of {total_rows} rows are shown due to the safety row cap."
 
 
 def _format_table(df: pd.DataFrame) -> str:
     return df.to_string(index=False)
 
 
-def build_report_messages(question: str, df: pd.DataFrame) -> list[BaseMessage]:
+def build_report_messages(
+    question: str,
+    df: pd.DataFrame,
+    *,
+    truncated: bool = False,
+    total_rows: int | None = None,
+) -> list[BaseMessage]:
     """Build the system+user messages for the report model from ``df``."""
 
+    table = _format_table(df)
+    if truncated:
+        table = f"{table}\n\n{_truncation_notice(len(df), total_rows)}"
     return [
         SystemMessage(content=REPORT_SYSTEM_PROMPT),
-        HumanMessage(content=REPORT_USER_TEMPLATE.format(question=question, table=_format_table(df))),
+        HumanMessage(content=REPORT_USER_TEMPLATE.format(question=question, table=table)),
     ]
 
 
@@ -43,9 +53,21 @@ def generate_report(
     chat_model: BaseChatModel,
     *,
     config: RunnableConfig | None = None,
+    truncated: bool = False,
+    total_rows: int | None = None,
 ) -> str:
     """Return the analytical report text for ``question`` over the masked ``df``."""
 
-    response = chat_model.invoke(build_report_messages(question, df), config=config)
+    response = chat_model.invoke(
+        build_report_messages(question, df, truncated=truncated, total_rows=total_rows),
+        config=config,
+    )
     content = response.content
-    return content if isinstance(content, str) else str(content)
+    report = content if isinstance(content, str) else str(content)
+    if truncated:
+        return f"{report}\n\n{_truncation_notice(len(df), total_rows)}"
+    return report
+
+
+def _truncation_notice(shown_rows: int, total_rows: int | None) -> str:
+    return TRUNCATED_RESULT_TEMPLATE.format(total_rows=total_rows or shown_rows, shown_rows=shown_rows)

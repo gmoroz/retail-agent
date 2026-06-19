@@ -26,6 +26,8 @@ class AgentState(TypedDict, total=False):
     sql: NotRequired[str | None]
     validation_error: NotRequired[str | None]
     masked_result_rows: NotRequired[list[dict[str, object]]]
+    result_total_rows: NotRequired[int | None]
+    result_truncated: NotRequired[bool]
     report: NotRequired[str | None]
     scrubbed_report: NotRequired[str | None]
     self_correct_count: NotRequired[int]

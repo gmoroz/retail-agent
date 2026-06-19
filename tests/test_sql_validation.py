@@ -17,6 +17,7 @@ from retail_agent.exceptions import (
 from retail_agent.services.sql_validation import validate_read_only_sql
 
 DS = "`bigquery-public-data.thelook_ecommerce`"
+DATASET_DS = "thelook_ecommerce"
 DML_DDL = [
     ("delete", f"DELETE FROM {DS}.orders"),
     ("update", f"UPDATE {DS}.orders SET status = 'x'"),
@@ -33,11 +34,26 @@ DML_DDL = [
     ),
     ("truncate", f"TRUNCATE TABLE {DS}.orders"),
 ]
+NON_READONLY_TOP_LEVEL = [
+    ("call", "CALL proc()"),
+    ("export", 'EXPORT DATA OPTIONS(uri="gs://bucket/file", format="CSV") AS SELECT 1'),
+    ("grant", f'GRANT SELECT ON TABLE {DS}.orders TO "user:a@example.com"'),
+    (
+        "load",
+        f'LOAD DATA INTO {DS}.orders FROM FILES (format = "CSV", uris = ["gs://bucket/file.csv"])',
+    ),
+]
 
 
 @pytest.mark.parametrize("sql", [s for _, s in DML_DDL], ids=[i for i, _ in DML_DDL])
 def test_validate_dml_ddl_rejected(sql: str) -> None:
     with pytest.raises(SqlValidationError):
+        validate_read_only_sql(sql)
+
+
+@pytest.mark.parametrize("sql", [s for _, s in NON_READONLY_TOP_LEVEL], ids=[i for i, _ in NON_READONLY_TOP_LEVEL])
+def test_validate_non_select_top_level_rejected(sql: str) -> None:
+    with pytest.raises(SqlValidationError, match="only SELECT or UNION statements are allowed"):
         validate_read_only_sql(sql)
 
 
@@ -62,6 +78,11 @@ def test_validate_disallowed_table_rejected(sql: str) -> None:
         validate_read_only_sql(sql)
 
 
+def test_validate_foreign_project_table_rejected() -> None:
+    with pytest.raises(DisallowedTableError, match="evil-project"):
+        validate_read_only_sql("SELECT COUNT(*) FROM `evil-project.thelook_ecommerce`.orders")
+
+
 @pytest.mark.parametrize("sql", ["", "   ", "\n\t"], ids=["empty", "whitespace", "newline"])
 def test_validate_empty_rejected(sql: str) -> None:
     with pytest.raises(SqlValidationError):
@@ -70,6 +91,7 @@ def test_validate_empty_rejected(sql: str) -> None:
 
 ACCEPT = [
     pytest.param(f"SELECT COUNT(*) FROM {DS}.orders", id="select"),
+    pytest.param(f"SELECT COUNT(*) FROM {DATASET_DS}.orders", id="dataset_qualified_default_project"),
     pytest.param(
         f"SELECT id FROM {DS}.orders UNION ALL SELECT id FROM {DS}.users",
         id="union_all",
@@ -103,6 +125,38 @@ def test_validate_readonly_accepted(sql: str) -> None:
 def test_validate_output_pii_projection_rejected(sql: str) -> None:
     with pytest.raises(SqlValidationError, match="do not output PII columns; use user_id"):
         validate_read_only_sql(sql)
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        pytest.param(f"SELECT * FROM {DS}.users", id="users_star"),
+        pytest.param(
+            f"SELECT u.* FROM {DS}.users u JOIN {DS}.orders o ON u.id = o.user_id",
+            id="table_star_join",
+        ),
+        pytest.param(
+            f"SELECT * FROM {DS}.orders o JOIN {DS}.users u ON u.id = o.user_id",
+            id="join_star_with_pii_table",
+        ),
+    ],
+)
+def test_validate_star_projection_from_pii_table_rejected(sql: str) -> None:
+    with pytest.raises(SqlValidationError, match="do not SELECT \\* from PII-bearing tables"):
+        validate_read_only_sql(sql)
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        pytest.param(f"SELECT * FROM {DS}.orders", id="orders_star"),
+        pytest.param(f"SELECT COUNT(*) AS users FROM {DS}.users", id="users_count_star"),
+    ],
+)
+def test_validate_non_pii_star_or_aggregate_star_accepted(sql: str) -> None:
+    statement = validate_read_only_sql(sql)
+
+    assert isinstance(statement, exp.Expression)
 
 
 def test_validate_geo_dimension_output_accepted() -> None:

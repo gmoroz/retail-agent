@@ -2,14 +2,15 @@
 
 Pure logic, no I/O: the validator never touches BigQuery; dry-run byte estimation
 lives in :mod:`retail_agent.repositories.bigquery`. The contract enforced here is
-the single combined rule from plan review (PR-001/002/008):
+the single combined rule from plan review (PR-001/002/008) plus the safety-bypass
+hardening:
 
 1. exactly one statement -- ``sqlglot.parse`` (not ``parse_one``) so a trailing
    ``; DROP TABLE`` is not silently dropped (PR-001);
-2. read-only deny-list -- reject any DML/DDL node in the tree rather than
-   allow-listing ``exp.Select`` alone, so top-level ``UNION``/``UNION ALL``/CTE
-   pass (PR-008);
-3. table subset -- every referenced table must be in :data:`ALLOWED_TABLES`;
+2. top-level read-only allow-list -- only ``SELECT`` and ``UNION`` statements may
+   proceed;
+3. read-only deny-list -- reject any DML/DDL node in the tree as defense in depth;
+4. table subset -- every referenced table must be in :data:`ALLOWED_TABLES`;
    a mixed allowed-plus-external query is rejected, not merely "contains one
    allowed" (PR-002).
 """
@@ -19,7 +20,12 @@ from typing import cast
 import sqlglot
 from sqlglot import exp
 
-from retail_agent.const import ALLOWED_TABLES, PII_COLUMN_NAMES, READONLY_SQL_DENYLIST
+from retail_agent.const import (
+    ALLOWED_TABLES,
+    PII_COLUMN_NAMES,
+    PII_COLUMNS,
+    READONLY_SQL_DENYLIST,
+)
 from retail_agent.exceptions import (
     DisallowedTableError,
     MultiStatementError,
@@ -27,9 +33,12 @@ from retail_agent.exceptions import (
 )
 
 READONLY_DENY_NODES: tuple[type[exp.Expression], ...] = tuple(getattr(exp, name) for name in READONLY_SQL_DENYLIST)
+READONLY_TOP_NODES: tuple[type[exp.Expression], ...] = (exp.Select, exp.Union)
 
 
 def _table_key(table: exp.Table) -> str:
+    if table.catalog and table.db:
+        return f"{table.catalog}.{table.db}.{table.name}"
     if table.db:
         return f"{table.db}.{table.name}"
     return table.name
@@ -62,6 +71,32 @@ def _output_pii_columns(statement: exp.Expression) -> set[str]:
     return pii_columns
 
 
+def _is_readonly_top_statement(statement: exp.Expression) -> bool:
+    if isinstance(statement, exp.Subquery):
+        return _is_readonly_top_statement(statement.this)
+    return isinstance(statement, READONLY_TOP_NODES)
+
+
+def _projection_has_output_star(projection: exp.Expression) -> bool:
+    if projection.is_star:
+        return True
+    if isinstance(projection, exp.Alias) and projection.this.is_star:
+        return True
+    return any(isinstance(column, exp.Column) and column.is_star for column in projection.find_all(exp.Column))
+
+
+def _outputs_star(statement: exp.Expression) -> bool:
+    return any(
+        _projection_has_output_star(projection)
+        for select in _output_selects(statement)
+        for projection in select.expressions
+    )
+
+
+def _references_pii_table(referenced_tables: set[str]) -> bool:
+    return any(table.rsplit(".", maxsplit=1)[-1] in PII_COLUMNS for table in referenced_tables)
+
+
 def validate_read_only_sql(sql: str) -> exp.Expression:
     """Validate ``sql`` as a single read-only statement over the allowlist.
 
@@ -84,13 +119,20 @@ def validate_read_only_sql(sql: str) -> exp.Expression:
     if not isinstance(statement, exp.Expression):
         raise SqlValidationError("SQL is empty")
 
+    if not _is_readonly_top_statement(statement):
+        raise SqlValidationError(f"only SELECT or UNION statements are allowed, got {type(statement).__name__}")
+
     deny_hit = statement.find(*READONLY_DENY_NODES)
     if deny_hit is not None:
         raise SqlValidationError(f"read-only deny-list hit: {type(deny_hit).__name__}")
 
-    disallowed = _referenced_tables(statement) - ALLOWED_TABLES
+    referenced_tables = _referenced_tables(statement)
+    disallowed = referenced_tables - ALLOWED_TABLES
     if disallowed:
         raise DisallowedTableError(f"tables outside the allowlist: {sorted(disallowed)}")
+
+    if _outputs_star(statement) and _references_pii_table(referenced_tables):
+        raise SqlValidationError("do not SELECT * from PII-bearing tables; enumerate non-PII columns; use user_id")
 
     pii_output = _output_pii_columns(statement)
     if pii_output:

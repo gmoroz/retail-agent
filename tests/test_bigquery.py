@@ -5,7 +5,7 @@ import pytest
 from google.api_core.exceptions import ServiceUnavailable
 
 import retail_agent.repositories.bigquery as bq_repo
-from retail_agent.const import ALLOWED_TABLES, MAX_BIGQUERY_BYTES_BILLED
+from retail_agent.const import MAX_BIGQUERY_BYTES_BILLED, THELOOK_DATASET, THELOOK_TABLES
 from retail_agent.exceptions import BigQueryExecutionError, CostBudgetExceededError
 from retail_agent.repositories.bigquery import (
     dry_run_bytes,
@@ -23,6 +23,37 @@ def test_query_execution_service_oversized_estimate_rejected() -> None:
 
     with pytest.raises(CostBudgetExceededError):
         service.execute("SELECT COUNT(*) FROM `bigquery-public-data.thelook_ecommerce`.orders")
+
+
+def test_query_execution_service_truncates_rows_above_cap() -> None:
+    service = QueryExecutionService(
+        dry_run_estimator=lambda sql: 1024,
+        query_runner=lambda sql: pd.DataFrame({"email": ["a@x.com", "b@y.com", "c@z.com"], "orders": [1, 2, 3]}),
+        max_result_rows=2,
+    )
+
+    execution = service.execute("SELECT email, orders FROM `bigquery-public-data.thelook_ecommerce`.users")
+
+    assert len(execution.masked_frame) == 2
+    assert execution.masked_frame["email"].tolist() == ["[redacted]", "[redacted]"]
+    assert execution.masked_frame["orders"].tolist() == [1, 2]
+    assert execution.total_rows == 3
+    assert execution.truncated
+
+
+def test_query_execution_service_keeps_rows_at_or_below_cap() -> None:
+    source_frame = pd.DataFrame({"order_id": [10, 20], "orders": [1, 2]})
+    service = QueryExecutionService(
+        dry_run_estimator=lambda sql: 1024,
+        query_runner=lambda sql: source_frame,
+        max_result_rows=2,
+    )
+
+    execution = service.execute("SELECT order_id, orders FROM `bigquery-public-data.thelook_ecommerce`.orders")
+
+    pd.testing.assert_frame_equal(execution.masked_frame, source_frame)
+    assert execution.total_rows == 2
+    assert not execution.truncated
 
 
 def test_run_query_materialization_error_wrapped(monkeypatch: pytest.MonkeyPatch, settings: object) -> None:
@@ -67,6 +98,6 @@ def test_dry_run_malformed_raises_execution_error() -> None:
 @pytest.mark.integration
 def test_introspect_schema_covers_allowlist() -> None:
     schema = introspect_schema()
-    assert set(schema) == set(ALLOWED_TABLES)
+    assert set(schema) == {f"{THELOOK_DATASET}.{table}" for table in THELOOK_TABLES}
     for columns in schema.values():
         assert columns, "every allowlist table should expose at least one column"
