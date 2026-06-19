@@ -44,9 +44,13 @@ def _table_key(table: exp.Table) -> str:
     return table.name
 
 
+def _is_cte_reference(table: exp.Table, cte_aliases: set[str]) -> bool:
+    return not table.catalog and not table.db and table.name in cte_aliases
+
+
 def _referenced_tables(statement: exp.Expression) -> set[str]:
     cte_aliases = {cte.alias for cte in statement.find_all(exp.CTE)}
-    return {_table_key(table) for table in statement.find_all(exp.Table) if table.name not in cte_aliases}
+    return {_table_key(table) for table in statement.find_all(exp.Table) if not _is_cte_reference(table, cte_aliases)}
 
 
 def _output_selects(statement: exp.Expression) -> list[exp.Select]:
@@ -69,6 +73,27 @@ def _output_pii_columns(statement: exp.Expression) -> set[str]:
                 column.name for column in projection.find_all(exp.Column) if column.name in PII_COLUMN_NAMES
             )
     return pii_columns
+
+
+def _pii_table_aliases(statement: exp.Expression) -> set[str]:
+    cte_aliases = {cte.alias for cte in statement.find_all(exp.CTE)}
+    return {
+        table.alias_or_name
+        for table in statement.find_all(exp.Table)
+        if not _is_cte_reference(table, cte_aliases) and table.name in PII_COLUMNS
+    }
+
+
+def _output_whole_pii_row_references(statement: exp.Expression, pii_aliases: set[str]) -> set[str]:
+    whole_row_references: set[str] = set()
+    for select in _output_selects(statement):
+        for projection in select.expressions:
+            whole_row_references.update(
+                column.name
+                for column in projection.find_all(exp.Column)
+                if not column.table and column.name in pii_aliases
+            )
+    return whole_row_references
 
 
 def _is_readonly_top_statement(statement: exp.Expression) -> bool:
@@ -137,5 +162,12 @@ def validate_read_only_sql(sql: str) -> exp.Expression:
     pii_output = _output_pii_columns(statement)
     if pii_output:
         raise SqlValidationError(f"do not output PII columns; use user_id instead: {sorted(pii_output)}")
+
+    whole_pii_rows = _output_whole_pii_row_references(statement, _pii_table_aliases(statement))
+    if whole_pii_rows:
+        raise SqlValidationError(
+            "do not output whole PII rows or structs; select explicit non-PII columns or user_id: "
+            f"{sorted(whole_pii_rows)}"
+        )
 
     return statement

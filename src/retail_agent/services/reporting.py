@@ -18,7 +18,14 @@ REPORT_SYSTEM_PROMPT = (
     "headline number, follow with one to three sentences of context (trends, "
     "comparisons, outliers), and avoid SQL jargon. If the result is empty, say so "
     "plainly instead of inventing figures. Use plain prose with at most a few short "
-    "bullets. Never state numbers that are not present in the data."
+    "bullets. Never state numbers that are not present in the data. Never display "
+    "customer PII such as email, names, street addresses, postal codes, latitude, "
+    "longitude or user_geom. Do not describe missing customer PII as a query error "
+    "or data problem, and do not suggest changing the query to select, add or "
+    "request email, name, address, postal-code, coordinate or other raw PII columns. "
+    "Identify customers with user_id only. If the user asks for customer PII, "
+    "briefly state that customer personal data is not displayed; use aggregates or "
+    "user_id identifiers instead, with no instructions for obtaining raw PII."
 )
 
 REPORT_USER_TEMPLATE = "Question:\n{question}\n\nQuery result:\n{table}\n\nWrite the report for the manager."

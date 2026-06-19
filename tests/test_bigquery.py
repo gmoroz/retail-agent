@@ -28,14 +28,14 @@ def test_query_execution_service_oversized_estimate_rejected() -> None:
 def test_query_execution_service_truncates_rows_above_cap() -> None:
     service = QueryExecutionService(
         dry_run_estimator=lambda sql: 1024,
-        query_runner=lambda sql: pd.DataFrame({"email": ["a@x.com", "b@y.com", "c@z.com"], "orders": [1, 2, 3]}),
+        query_runner=lambda sql: pd.DataFrame({"user_id": [10, 20, 30], "orders": [1, 2, 3]}),
         max_result_rows=2,
     )
 
-    execution = service.execute("SELECT email, orders FROM `bigquery-public-data.thelook_ecommerce`.users")
+    execution = service.execute("SELECT user_id, orders FROM `bigquery-public-data.thelook_ecommerce`.users")
 
     assert len(execution.masked_frame) == 2
-    assert execution.masked_frame["email"].tolist() == ["[redacted]", "[redacted]"]
+    assert execution.masked_frame["user_id"].tolist() == [10, 20]
     assert execution.masked_frame["orders"].tolist() == [1, 2]
     assert execution.total_rows == 3
     assert execution.truncated
@@ -54,6 +54,85 @@ def test_query_execution_service_keeps_rows_at_or_below_cap() -> None:
     pd.testing.assert_frame_equal(execution.masked_frame, source_frame)
     assert execution.total_rows == 2
     assert not execution.truncated
+
+
+def test_query_execution_service_adds_transfer_limit_when_missing() -> None:
+    observed_sql: list[str] = []
+
+    def record_dry_run(sql: str) -> int:
+        observed_sql.append(sql)
+        return 1024
+
+    def record_run(sql: str) -> pd.DataFrame:
+        observed_sql.append(sql)
+        return pd.DataFrame({"order_id": [10, 20, 30]})
+
+    service = QueryExecutionService(
+        dry_run_estimator=record_dry_run,
+        query_runner=record_run,
+        max_result_rows=2,
+    )
+
+    execution = service.execute("SELECT order_id FROM `bigquery-public-data.thelook_ecommerce`.orders")
+
+    assert observed_sql == [
+        "SELECT order_id FROM `bigquery-public-data.thelook_ecommerce.orders` LIMIT 3",
+        "SELECT order_id FROM `bigquery-public-data.thelook_ecommerce.orders` LIMIT 3",
+    ]
+    assert execution.truncated
+    assert len(execution.masked_frame) == 2
+
+
+def test_query_execution_service_preserves_smaller_user_limit() -> None:
+    observed_sql: list[str] = []
+
+    def record_dry_run(sql: str) -> int:
+        observed_sql.append(sql)
+        return 1024
+
+    def record_run(sql: str) -> pd.DataFrame:
+        observed_sql.append(sql)
+        return pd.DataFrame({"order_id": [10]})
+
+    service = QueryExecutionService(
+        dry_run_estimator=record_dry_run,
+        query_runner=record_run,
+        max_result_rows=5,
+    )
+
+    execution = service.execute("SELECT order_id FROM `bigquery-public-data.thelook_ecommerce`.orders LIMIT 2")
+
+    assert observed_sql == [
+        "SELECT order_id FROM `bigquery-public-data.thelook_ecommerce.orders` LIMIT 2",
+        "SELECT order_id FROM `bigquery-public-data.thelook_ecommerce.orders` LIMIT 2",
+    ]
+    assert not execution.truncated
+
+
+def test_query_execution_service_replaces_larger_user_limit() -> None:
+    observed_sql: list[str] = []
+
+    def record_dry_run(sql: str) -> int:
+        observed_sql.append(sql)
+        return 1024
+
+    def record_run(sql: str) -> pd.DataFrame:
+        observed_sql.append(sql)
+        return pd.DataFrame({"order_id": [10, 20, 30]})
+
+    service = QueryExecutionService(
+        dry_run_estimator=record_dry_run,
+        query_runner=record_run,
+        max_result_rows=2,
+    )
+
+    execution = service.execute("SELECT order_id FROM `bigquery-public-data.thelook_ecommerce`.orders LIMIT 20")
+
+    assert observed_sql == [
+        "SELECT order_id FROM `bigquery-public-data.thelook_ecommerce.orders` LIMIT 3",
+        "SELECT order_id FROM `bigquery-public-data.thelook_ecommerce.orders` LIMIT 3",
+    ]
+    assert execution.truncated
 
 
 def test_run_query_materialization_error_wrapped(monkeypatch: pytest.MonkeyPatch, settings: object) -> None:

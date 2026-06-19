@@ -14,9 +14,10 @@ from unittest.mock import MagicMock
 import openai
 import pandas as pd
 import pytest
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, SystemMessage
 
 from retail_agent.services import safety
+from retail_agent.services.reporting import REPORT_SYSTEM_PROMPT, build_report_messages
 from retail_agent.services.safety import (
     GuardVerdict,
     classify_and_guard,
@@ -88,6 +89,50 @@ def test_mask_data_missing_pii_columns_is_noop_for_analytical_columns() -> None:
     assert masked["revenue"].tolist() == [15.5, 21.0]
 
 
+def test_mask_data_masks_nested_dict_pii_values() -> None:
+    df = pd.DataFrame(
+        {
+            "profile": [
+                {
+                    "first_name": "Jane",
+                    "orders": [{"street_address": "1 Main St", "total": 42.5}],
+                    "country": "United States",
+                }
+            ],
+            "orders": [3],
+        }
+    )
+
+    masked = mask_data(df)
+
+    assert masked["profile"].iloc[0] == {
+        "first_name": "[redacted]",
+        "orders": [{"street_address": "[redacted]", "total": 42.5}],
+        "country": "United States",
+    }
+    assert masked["orders"].tolist() == [3]
+
+
+def test_mask_data_masks_json_object_pii_values() -> None:
+    df = pd.DataFrame(
+        {
+            "payload": [
+                (
+                    '{"first_name":"Jane","last_name":"Doe","email":"jane@example.com",'
+                    '"orders":[{"street_address":"1 Main St","total":42.5}],"country":"United States"}'
+                )
+            ]
+        }
+    )
+
+    masked = mask_data(df)
+
+    assert masked["payload"].iloc[0] == (
+        '{"first_name":"[redacted]","last_name":"[redacted]","email":"[redacted]",'
+        '"orders":[{"street_address":"[redacted]","total":42.5}],"country":"United States"}'
+    )
+
+
 def test_scrub_report_masks_email_keeps_numbers_dates_ids() -> None:
     text = "Revenue $1,234.56 on order 12345 (2023-01-15); contact a@x.com, ratio 99.5."
 
@@ -110,6 +155,28 @@ def test_email_masking_single_source() -> None:
 
     assert mask_question(text) == scrub_report(text) == mask_emails(text)
     assert "example.co.uk" not in mask_emails(text)
+
+
+def test_report_system_prompt_contains_pii_wording_guardrails() -> None:
+    prompt = REPORT_SYSTEM_PROMPT.lower()
+
+    assert "never display customer pii" in prompt
+    assert "do not describe missing customer pii as a query error" in prompt
+    assert "do not suggest changing the query to select, add or request email" in prompt
+    assert "identify customers with user_id only" in prompt
+    assert "customer personal data is not displayed" in prompt
+
+
+def test_build_report_messages_includes_pii_guardrails_for_pii_question() -> None:
+    df = pd.DataFrame({"user_id": [101, 202], "orders": [3, 1]})
+
+    messages = build_report_messages("Show me customers' emails", df)
+
+    assert isinstance(messages[0], SystemMessage)
+    system_prompt = str(messages[0].content).lower()
+    assert "never display customer pii" in system_prompt
+    assert "identify customers with user_id only" in system_prompt
+    assert "show me customers' emails" in str(messages[1].content).lower()
 
 
 @pytest.mark.parametrize(

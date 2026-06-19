@@ -83,6 +83,21 @@ def test_validate_foreign_project_table_rejected() -> None:
         validate_read_only_sql("SELECT COUNT(*) FROM `evil-project.thelook_ecommerce`.orders")
 
 
+def test_validate_qualified_foreign_table_inside_cte_rejected() -> None:
+    sql = "WITH users AS (SELECT * FROM `evil-project.thelook_ecommerce`.users) SELECT COUNT(*) FROM users"
+
+    with pytest.raises(DisallowedTableError, match="evil-project"):
+        validate_read_only_sql(sql)
+
+
+def test_validate_unqualified_cte_reference_accepted() -> None:
+    sql = f"WITH c AS (SELECT user_id FROM {DATASET_DS}.orders) SELECT * FROM c"
+
+    statement = validate_read_only_sql(sql)
+
+    assert isinstance(statement, exp.Expression)
+
+
 @pytest.mark.parametrize("sql", ["", "   ", "\n\t"], ids=["empty", "whitespace", "newline"])
 def test_validate_empty_rejected(sql: str) -> None:
     with pytest.raises(SqlValidationError):
@@ -149,6 +164,20 @@ def test_validate_star_projection_from_pii_table_rejected(sql: str) -> None:
 @pytest.mark.parametrize(
     "sql",
     [
+        pytest.param(f"SELECT u FROM {DS}.users u", id="alias_whole_row"),
+        pytest.param(f"SELECT TO_JSON_STRING(u) FROM {DS}.users u", id="json_whole_row"),
+        pytest.param(f"SELECT STRUCT(u) FROM {DS}.users u", id="struct_whole_row"),
+        pytest.param(f"SELECT users FROM {DATASET_DS}.users", id="table_name_whole_row"),
+    ],
+)
+def test_validate_whole_pii_row_projection_rejected(sql: str) -> None:
+    with pytest.raises(SqlValidationError, match="do not output whole PII rows or structs"):
+        validate_read_only_sql(sql)
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
         pytest.param(f"SELECT * FROM {DS}.orders", id="orders_star"),
         pytest.param(f"SELECT COUNT(*) AS users FROM {DS}.users", id="users_count_star"),
     ],
@@ -161,5 +190,18 @@ def test_validate_non_pii_star_or_aggregate_star_accepted(sql: str) -> None:
 
 def test_validate_geo_dimension_output_accepted() -> None:
     statement = validate_read_only_sql(f"SELECT country, COUNT(*) AS users FROM {DS}.users GROUP BY country")
+
+    assert isinstance(statement, exp.Expression)
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        pytest.param(f"SELECT user_id, age FROM {DS}.users", id="explicit_non_pii"),
+        pytest.param(f"SELECT country, COUNT(*) FROM {DATASET_DS}.users GROUP BY country", id="grouped_dimension"),
+    ],
+)
+def test_validate_explicit_non_pii_user_outputs_accepted(sql: str) -> None:
+    statement = validate_read_only_sql(sql)
 
     assert isinstance(statement, exp.Expression)

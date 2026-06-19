@@ -1,10 +1,10 @@
 """Input guard and PII masking (ADR-010, PR-009).
 
 One email regex is the single source of truth for PII egress. ``mask_data``
-(column-aware masking of known ``users`` PII columns plus email regex on string
-cells), ``scrub_report`` (email-only safety net after the report LLM) and
-``mask_question`` (email pre-mask before external question-bearing model calls) all
-route through :func:`mask_emails`.
+(column-aware masking of known ``users`` PII columns, recursive nested-cell PII key
+masking, plus email regex on remaining strings), ``scrub_report`` (email-only
+safety net after the report LLM) and ``mask_question`` (email pre-mask before
+external question-bearing model calls) all route through :func:`mask_emails`.
 
 Phone is intentionally absent: the audited thelook schema has no phone column and a
 broad phone regex corrupts analytics numbers (verified). Numeric, date and id columns
@@ -263,15 +263,30 @@ def _fallback_guard_decision(
 
 
 def _mask_cell(value: object) -> object:
-    return EMAIL_RE.sub(EMAIL_MASK, value) if isinstance(value, str) else value
+    if isinstance(value, dict):
+        return {
+            key: PII_COLUMN_MASK if str(key) in PII_COLUMN_NAMES else _mask_cell(nested_value)
+            for key, nested_value in value.items()
+        }
+    if isinstance(value, list):
+        return [_mask_cell(nested_value) for nested_value in value]
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return EMAIL_RE.sub(EMAIL_MASK, value)
+        if isinstance(parsed, dict | list):
+            return json.dumps(_mask_cell(parsed), ensure_ascii=False, separators=(",", ":"))
+        return EMAIL_RE.sub(EMAIL_MASK, value)
+    return value
 
 
 def mask_data(df: pd.DataFrame) -> pd.DataFrame:
     """Mask PII in a result DataFrame in place of the original.
 
-    Known PII columns (``PII_COLUMN_NAMES``) are replaced wholesale; remaining string
-    columns get the email regex applied cell by cell. Numeric, date and id columns are
-    left untouched.
+    Known PII columns (``PII_COLUMN_NAMES``) are replaced wholesale; remaining
+    object and string cells get nested PII-key masking plus the email regex. Numeric,
+    date and id columns are left untouched.
     """
 
     masked = df.copy()
@@ -279,6 +294,6 @@ def mask_data(df: pd.DataFrame) -> pd.DataFrame:
         name = str(column)
         if name in PII_COLUMN_NAMES:
             masked[column] = PII_COLUMN_MASK
-        elif pd.api.types.is_string_dtype(masked[column]):
+        elif pd.api.types.is_string_dtype(masked[column]) or pd.api.types.is_object_dtype(masked[column]):
             masked[column] = masked[column].map(_mask_cell)
     return masked
