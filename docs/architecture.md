@@ -123,7 +123,7 @@ sequenceDiagram
                 Graph->>Trace: finalize(cost_exceeded)
                 Graph-->>CLI: cost refusal
             else within cap
-                Graph->>BQ: execute with maximum_bytes_billed and timeout
+                Graph->>BQ: execute with maximum_bytes_billed, timeout, and bounded LIMIT
                 alt BigQuery execution error and retry budget remains
                     Graph->>Graph: self_correct count + feedback
                     Graph->>OR: regenerate SQL
@@ -149,25 +149,25 @@ The HLD below is grounded in the current code, not only in the plan:
 
 | Area | Implementation anchors |
 |---|---|
-| Graph nodes and routing | `src/retail_agent/agent/graph.py:149`, `src/retail_agent/agent/graph.py:293`, `src/retail_agent/agent/graph.py:367` |
-| Serializable graph state and outcomes | `src/retail_agent/agent/state.py:8`, `src/retail_agent/agent/state.py:19` |
-| SQL prompts and self-correction prompt | `src/retail_agent/agent/prompts.py:8`, `src/retail_agent/agent/prompts.py:71` |
-| Env-driven settings and sync DB URL split | `src/retail_agent/config.py:18`, `src/retail_agent/config.py:92` |
-| Table allowlist, PII columns, model slugs | `src/retail_agent/const.py:19`, `src/retail_agent/const.py:28`, `src/retail_agent/const.py:53` |
-| SQL AST validation | `src/retail_agent/services/sql_validation.py:41` |
-| Guard and PII masking | `src/retail_agent/services/safety.py:185`, `src/retail_agent/services/safety.py:282` |
-| Report generation from masked rows | `src/retail_agent/services/reporting.py:40` |
-| Trace collection and JSON logging | `src/retail_agent/services/observability.py:155`, `src/retail_agent/services/observability.py:241` |
-| LLM factory | `src/retail_agent/services/llm.py:32` |
-| BigQuery dry run, execution, schema introspection | `src/retail_agent/repositories/bigquery.py:35`, `src/retail_agent/repositories/bigquery.py:47`, `src/retail_agent/repositories/bigquery.py:67` |
-| Service-layer BigQuery cost guard | `src/retail_agent/services/query_execution.py:27` |
-| Golden retrieval orchestration | `src/retail_agent/services/retrieval.py:22` |
-| OpenRouter embeddings | `src/retail_agent/repositories/embeddings.py:19`, `src/retail_agent/repositories/embeddings.py:46` |
-| Golden bucket retrieval | `src/retail_agent/repositories/golden_bucket.py:41`, `src/retail_agent/repositories/golden_bucket.py:63` |
-| LangGraph Postgres checkpointer | `src/retail_agent/repositories/postgres.py:14`, `src/retail_agent/repositories/postgres.py:28` |
-| Golden Trio ORM model and Alembic schema | `src/retail_agent/models.py:20`, `alembic/versions/0001_init_golden_bucket.py:19` |
-| CLI resilience boundary | `src/retail_agent/cli.py:59`, `src/retail_agent/cli.py:86` |
-| Eval runner and ranking | `src/retail_agent/evaluation/runner.py:31`, `src/retail_agent/evaluation/ranking.py:37` |
+| Graph nodes and routing | `src/retail_agent/agent/graph.py`, `src/retail_agent/agent/graph.py`, `src/retail_agent/agent/graph.py` |
+| Serializable graph state and outcomes | `src/retail_agent/agent/state.py`, `src/retail_agent/agent/state.py` |
+| SQL prompts and self-correction prompt | `src/retail_agent/agent/prompts.py`, `src/retail_agent/agent/prompts.py` |
+| Env-driven settings and sync DB URL split | `src/retail_agent/config.py`, `src/retail_agent/config.py` |
+| Table allowlist, PII columns, model slugs | `src/retail_agent/const.py`, `src/retail_agent/const.py`, `src/retail_agent/const.py` |
+| SQL AST validation | `src/retail_agent/services/sql_validation.py` |
+| Guard and PII masking | `src/retail_agent/services/safety.py`, `src/retail_agent/services/safety.py` |
+| Report generation from masked rows | `src/retail_agent/services/reporting.py` |
+| Trace collection and JSON logging | `src/retail_agent/services/observability.py`, `src/retail_agent/services/observability.py` |
+| LLM factory | `src/retail_agent/services/llm.py` |
+| BigQuery dry run, execution, schema introspection | `src/retail_agent/repositories/bigquery.py`, `src/retail_agent/repositories/bigquery.py`, `src/retail_agent/repositories/bigquery.py` |
+| Service-layer BigQuery cost guard | `src/retail_agent/services/query_execution.py` |
+| Golden retrieval orchestration | `src/retail_agent/services/retrieval.py` |
+| OpenRouter embeddings | `src/retail_agent/repositories/embeddings.py`, `src/retail_agent/repositories/embeddings.py` |
+| Golden bucket retrieval | `src/retail_agent/repositories/golden_bucket.py`, `src/retail_agent/repositories/golden_bucket.py` |
+| LangGraph Postgres checkpointer | `src/retail_agent/repositories/postgres.py`, `src/retail_agent/repositories/postgres.py` |
+| Golden Trio ORM model and Alembic schema | `src/retail_agent/models.py`, `alembic/versions/0001_init_golden_bucket.py` |
+| CLI resilience boundary | `src/retail_agent/cli.py`, `src/retail_agent/cli.py` |
+| Eval runner and ranking | `src/retail_agent/evaluation/runner.py`, `src/retail_agent/evaluation/ranking.py` |
 
 Implementation note: `AgentDependencies` now injects cohesive services for
 Golden retrieval, schema loading, and query execution, while repositories remain
@@ -181,13 +181,13 @@ thin I/O modules. The BigQuery cost decision lives in
 The project is a synchronous CLI, not a web service. There is no HTTP API, FastAPI
 router, event loop, or async database layer. The CLI only parses input, manages
 `thread_id`, prints output, and delegates to a compiled LangGraph graph
-(`src/retail_agent/cli.py:59`, `src/retail_agent/cli.py:86`). Business logic lives
+(`src/retail_agent/cli.py`, `src/retail_agent/cli.py`). Business logic lives
 in services and graph nodes; data access lives in repositories.
 
 LangGraph `StateGraph` is used instead of a prebuilt agent because the workflow has
 explicit safety gates, SQL validation, bounded self-correction, cost refusal,
 no-data handling, PII ordering, and trace finalization. Those branches are visible
-in the graph wiring (`src/retail_agent/agent/graph.py:367`) and correspond to
+in the graph wiring (`src/retail_agent/agent/graph.py`) and correspond to
 ADR-024.
 
 ### Postgres + pgvector as one state store
@@ -195,14 +195,14 @@ ADR-024.
 Postgres is the single state store for two different concerns:
 
 - LangGraph checkpointer tables, created by `PostgresSaver.setup()` at runtime over
-  a native psycopg pool (`src/retail_agent/repositories/postgres.py:28`).
+  a native psycopg pool (`src/retail_agent/repositories/postgres.py`).
 - Golden bucket rows in `golden_trios`, managed by SQLAlchemy and Alembic
-  (`src/retail_agent/models.py:20`, `alembic/versions/0001_init_golden_bucket.py:19`).
+  (`src/retail_agent/models.py`, `alembic/versions/0001_init_golden_bucket.py`).
 
 This follows ADR-002 and ADR-019. It avoids a split SQLite plus vector-store setup
 and keeps chat history, graph state, and few-shot knowledge in one production-shaped
 database. The schema uses pgvector `Vector(1024)` and an HNSW index with
-`vector_cosine_ops` (`alembic/versions/0001_init_golden_bucket.py:36`), matching
+`vector_cosine_ops` (`alembic/versions/0001_init_golden_bucket.py`), matching
 ADR-012.
 
 ### BigQuery read-only analytics source
@@ -213,17 +213,18 @@ BigQuery dry runs and server-side caps:
 
 - `validate_read_only_sql` requires exactly one statement, rejects DML/DDL nodes,
   and requires every referenced table to be in the allowlist
-  (`src/retail_agent/services/sql_validation.py:41`).
-- `QueryExecutionService` asks BigQuery for a byte estimate and rejects
-  over-budget SQL before execution (`src/retail_agent/services/query_execution.py:27`).
+  (`src/retail_agent/services/sql_validation.py`).
+- `QueryExecutionService` asks BigQuery for a byte estimate, injects a bounded
+  top-level `LIMIT` for result transfer, and rejects over-budget SQL before
+  execution (`src/retail_agent/services/query_execution.py`).
 - `run_query` executes validated SQL with `maximum_bytes_billed` plus
   `job_timeout_ms` as BigQuery-side request limits
-  (`src/retail_agent/repositories/bigquery.py:47`).
+  (`src/retail_agent/repositories/bigquery.py`).
 
 The production IAM posture is a read-only BigQuery service account with data-viewer
 and job-runner permissions only. The prototype keeps credentials out of the repo
 and loads them from ADC or `GOOGLE_APPLICATION_CREDENTIALS`
-(`src/retail_agent/config.py:38`).
+(`src/retail_agent/config.py`).
 
 ### OpenRouter LLMs, embeddings, and judge
 
@@ -231,21 +232,23 @@ One OpenAI-compatible path is used for chat models, A/B candidates, the judge, a
 embeddings:
 
 - The default chat factory reads `LLM_BASE_URL`, `LLM_API_KEY`, and `LLM_MODEL`
-  for provider-agnostic dev or production endpoints (`src/retail_agent/services/llm.py:63`).
+  for provider-agnostic dev or production endpoints (`src/retail_agent/services/llm.py`).
 - A/B and judge calls use OpenRouter with explicit model slugs
-  (`src/retail_agent/services/llm.py:46`).
+  (`src/retail_agent/services/llm.py`).
 - Embeddings use OpenRouter `baai/bge-m3`, and the repository validates the returned
-  vector dimension against 1024 (`src/retail_agent/repositories/embeddings.py:32`).
+  vector dimension against 1024 (`src/retail_agent/repositories/embeddings.py`).
 
 The A/B set is `deepseek/deepseek-v4-flash`, `qwen/qwen3.7-plus`,
 `moonshotai/kimi-k2`, and `z-ai/glm-5.2`; the judge is
-`google/gemini-3.5-flash` (`src/retail_agent/const.py:53`,
-`src/retail_agent/const.py:60`). ADR-016 selected these from the OpenRouter catalog
+`google/gemini-3.5-flash` (`src/retail_agent/const.py`,
+`src/retail_agent/const.py`). ADR-016 selected these from the OpenRouter catalog
 and Tinybird SQL Generation Benchmark as a text-to-SQL focused mix of price and
-quality. The completed 4x20 eval pins `deepseek/deepseek-v4-flash` as the default:
-correctness tied at 0.800 across deepseek, qwen and glm; glm's 0.635 quality and
-deepseek's 0.633 quality fall inside the 0.05 LLM-judge noise band, so PR-005
-falls through to cost and latency.
+quality. The completed 4x20 eval keeps `qwen/qwen3.7-plus` as the accuracy
+leader at 0.750 correctness, but pins `deepseek/deepseek-v4-flash` as the
+deployed default because the default must fit the interactive latency SLA.
+`qwen` is one holdout question more correct than `deepseek`, but its 95.34s mean
+latency is about 4.4x slower than `deepseek` and exceeds the `<=45s` default
+budget.
 
 ### SQL validation with sqlglot
 
@@ -253,94 +256,96 @@ sqlglot is used because the target dialect is BigQuery GoogleSQL, not Postgres.
 The validator calls `sqlglot.parse(..., dialect="bigquery")` so multi-statement
 SQL is visible and rejected, then uses a read-only deny-list instead of requiring
 the top-level expression to be `Select`. That permits valid top-level `UNION` and
-CTE queries while still rejecting DML and DDL (`src/retail_agent/services/sql_validation.py:51`).
+CTE queries while still rejecting DML and DDL (`src/retail_agent/services/sql_validation.py`).
 ADR-009 and ADR-018 document this choice.
 
 ### Alembic + SQLAlchemy
 
 Golden-bucket schema is owned by Alembic migrations, not a Docker `init.sql`.
-`Base.metadata` is the migration target (`src/retail_agent/models.py:16`), and
+`Base.metadata` is the migration target (`src/retail_agent/models.py`), and
 the migration creates the `vector` extension, table, and HNSW index
-(`alembic/versions/0001_init_golden_bucket.py:19`). `DB_URI` stays in native
+(`alembic/versions/0001_init_golden_bucket.py`). `DB_URI` stays in native
 `postgresql://` form for psycopg and is converted to `postgresql+psycopg://` only
-for SQLAlchemy consumers (`src/retail_agent/config.py:92`), as recorded in ADR-021.
+for SQLAlchemy consumers (`src/retail_agent/config.py`), as recorded in ADR-021.
 
 ## Data flow
 
 1. The CLI starts logging, compiles the graph once, creates a `thread_id`, and
-   invokes the graph for each user question (`src/retail_agent/cli.py:59`).
+   invokes the graph for each user question (`src/retail_agent/cli.py`).
 2. `guard` creates a per-run `TraceCollector`, stores the human message, and runs
    the safety guard. Rule hits block prompt injection and destructive SQL phrases
    without an LLM call; remaining questions are classified by an LLM
-   (`src/retail_agent/agent/graph.py:144`, `src/retail_agent/services/safety.py:185`).
+   (`src/retail_agent/agent/graph.py`, `src/retail_agent/services/safety.py`).
    Schema metadata questions are allowed deterministically and return the formatted
    allowlist schema without embeddings, SQL generation, or query execution.
 3. `guard` stores an email-masked question before external question-bearing model
    calls. `retrieve_golden` reuses that masking before embeddings, calls
    OpenRouter `baai/bge-m3`, and retrieves top-k Golden Trios by pgvector cosine
-   distance (`src/retail_agent/agent/graph.py:178`,
-   `src/retail_agent/repositories/golden_bucket.py:63`).
+   distance (`src/retail_agent/agent/graph.py`,
+   `src/retail_agent/repositories/golden_bucket.py`).
 4. `generate_sql` loads the allowlist table schema from BigQuery, builds the SQL
    prompt with the masked question, schema and few-shot examples, and invokes the chat model
-   (`src/retail_agent/agent/graph.py:190`,
-   `src/retail_agent/agent/prompts.py:71`).
+   (`src/retail_agent/agent/graph.py`,
+   `src/retail_agent/agent/prompts.py`).
 5. `validate_sql` enforces the sqlglot read-only contract and rejects output
-   projections derived from raw PII columns, including aliases and functions
-   (`src/retail_agent/agent/graph.py:229`).
+   projections derived from raw PII columns, including aliases, functions,
+   whole-row table aliases, `STRUCT(alias)`, and JSON stringification
+   (`src/retail_agent/agent/graph.py`).
 6. `run_sql` delegates dry-run cost checking and masked execution to
-   `QueryExecutionService`, then stores only masked rows in a
+   `QueryExecutionService`, which injects a server-side row-transfer limit before
+   BigQuery execution, then stores only masked rows in a
    checkpoint-serializable form
-   (`src/retail_agent/agent/graph.py:242`, `src/retail_agent/agent/graph.py:133`).
+   (`src/retail_agent/agent/graph.py`, `src/retail_agent/agent/graph.py`).
 7. Invalid SQL and BigQuery execution errors route to `self_correct`, which adds
    feedback to the next SQL prompt until `MAX_SELF_CORRECT_ITERATIONS` is reached
-   (`src/retail_agent/agent/graph.py:239`, `src/retail_agent/agent/graph.py:343`).
+   (`src/retail_agent/agent/graph.py`, `src/retail_agent/agent/graph.py`).
 8. Empty valid results route to `no_data_report`; they are not self-corrected
-   (`src/retail_agent/agent/graph.py:353`).
+   (`src/retail_agent/agent/graph.py`).
 9. Non-empty masked rows pass to `generate_report`. The report LLM receives the
-   masked question and masked data (`src/retail_agent/agent/graph.py:267`,
-   `src/retail_agent/services/reporting.py:40`).
+   masked question and masked data (`src/retail_agent/agent/graph.py`,
+   `src/retail_agent/services/reporting.py`).
 10. `scrub_report` applies the email safety net after the LLM, then `finalize`
-    emits the trace and adds the AI message to state (`src/retail_agent/agent/graph.py:283`,
-    `src/retail_agent/agent/graph.py:133`).
+    emits the trace and adds the AI message to state (`src/retail_agent/agent/graph.py`,
+    `src/retail_agent/agent/graph.py`).
 
 ## Error handling and fallback strategies
 
 - Input guard failures produce a refusal and route to `finalize` with `blocked`
-  outcome (`src/retail_agent/agent/graph.py:166`).
+  outcome (`src/retail_agent/agent/graph.py`).
 - LLM failures in guard, SQL generation, or reporting are caught in graph nodes and
   return a neutral failure response instead of crashing the CLI
-  (`src/retail_agent/agent/graph.py:161`, `src/retail_agent/agent/graph.py:211`,
-  `src/retail_agent/agent/graph.py:283`).
+  (`src/retail_agent/agent/graph.py`, `src/retail_agent/agent/graph.py`,
+  `src/retail_agent/agent/graph.py`).
 - Golden retrieval failure is degraded to no few-shot examples; the graph still
-  tries to answer from schema and the SQL prompt (`src/retail_agent/agent/graph.py:187`).
+  tries to answer from schema and the SQL prompt (`src/retail_agent/agent/graph.py`).
 - SQL validation errors and BigQuery execution errors enter a bounded
-  self-correction loop (`src/retail_agent/agent/graph.py:326`,
-  `src/retail_agent/agent/graph.py:337`).
+  self-correction loop (`src/retail_agent/agent/graph.py`,
+  `src/retail_agent/agent/graph.py`).
 - BigQuery cost overrun is a terminal cost refusal, not a self-correction attempt
-  (`src/retail_agent/agent/graph.py:335`).
+  (`src/retail_agent/agent/graph.py`).
 - Empty results are a terminal no-data answer, not an error
-  (`src/retail_agent/agent/graph.py:339`).
+  (`src/retail_agent/agent/graph.py`).
 - Chat models and embeddings use fixed retry counts and request timeouts from
-  `const.py` (`src/retail_agent/services/llm.py:58`,
-  `src/retail_agent/repositories/embeddings.py:24`).
+  `const.py` (`src/retail_agent/services/llm.py`,
+  `src/retail_agent/repositories/embeddings.py`).
 - The eval harness adds explicit retry handling for rate-limit shaped failures
-  (`src/retail_agent/evaluation/runner.py:157`, `src/retail_agent/evaluation/scoring.py:75`).
+  (`src/retail_agent/evaluation/runner.py`, `src/retail_agent/evaluation/scoring.py`).
 - The CLI has the outer resilience boundary: it logs domain or unexpected failures
-  and keeps the chat loop alive (`src/retail_agent/cli.py:86`).
+  and keeps the chat loop alive (`src/retail_agent/cli.py`).
 
 ## Observability
 
 Each graph invocation has a `TraceCollector`. It records every chat-model call,
 latency, prompt and completion tokens, total tokens, and OpenRouter charged cost
-when the provider returns it (`src/retail_agent/services/observability.py:126`).
+when the provider returns it (`src/retail_agent/services/observability.py`).
 At graph finalization it adds outcome, total latency, BigQuery bytes,
-self-correction iterations, and the last error (`src/retail_agent/services/observability.py:241`).
+self-correction iterations, and the last error (`src/retail_agent/services/observability.py`).
 `configure_logging` emits JSON logs for machine parsing
-(`src/retail_agent/services/observability.py:77`).
+(`src/retail_agent/services/observability.py`).
 
 Conversation recovery and multi-turn continuity come from LangGraph checkpointer
-state keyed by the CLI `thread_id` (`src/retail_agent/cli.py:35`,
-`src/retail_agent/repositories/postgres.py:28`).
+state keyed by the CLI `thread_id` (`src/retail_agent/cli.py`,
+`src/retail_agent/repositories/postgres.py`).
 
 ## Setup and run
 
@@ -414,13 +419,13 @@ without new LLM or BigQuery calls.
 Status: implemented in prototype, with a design extension for ongoing learning.
 
 The Golden bucket stores Trios: question, SQL, report, and embedding
-(`src/retail_agent/models.py:20`). `make ingest-golden` loads seed Trios from
+(`src/retail_agent/models.py`). `make ingest-golden` loads seed Trios from
 `eval/seed_trios.json` through `ingest_seed_trios`
-(`src/retail_agent/evaluation/io.py:67`, `src/retail_agent/ingest_golden.py:19`).
+(`src/retail_agent/evaluation/io.py`, `src/retail_agent/ingest_golden.py`).
 At query time, the graph masks emails in the question, embeds the masked question
 with OpenRouter `baai/bge-m3`, retrieves top-k similar Trios by pgvector cosine
-distance, and injects them into the SQL prompt (`src/retail_agent/agent/graph.py:181`,
-`src/retail_agent/agent/prompts.py:51`).
+distance, and injects them into the SQL prompt (`src/retail_agent/agent/graph.py`,
+`src/retail_agent/agent/prompts.py`).
 
 Production learning loop: successful or human-approved interactions become new
 candidate Trios, are reviewed for SQL correctness and PII safety, embedded, and
@@ -433,26 +438,28 @@ Status: implemented in prototype.
 
 Input safety combines deterministic regex blocking for prompt injection and
 destructive SQL phrases with an LLM classifier for intent and off-topic questions
-(`src/retail_agent/services/safety.py:42`, `src/retail_agent/services/safety.py:185`).
+(`src/retail_agent/services/safety.py`, `src/retail_agent/services/safety.py`).
 SQL safety is enforced by sqlglot AST validation and BigQuery caps
-(`src/retail_agent/services/sql_validation.py:41`,
-`src/retail_agent/services/query_execution.py:27`).
+(`src/retail_agent/services/sql_validation.py`,
+`src/retail_agent/services/query_execution.py`).
 
 PII masking is ordered so raw result PII does not reach either checkpoint state
 or the report LLM: `run_sql masks rows -> generate_report -> scrub_report`.
-`mask_data` replaces known `users` PII columns and applies the shared email regex
-to string cells (`src/retail_agent/services/safety.py:268`). The PII set is
+`mask_data` replaces known `users` PII columns, recursively redacts PII keys in
+struct-like cells and JSON object/array strings, and applies the shared email regex
+to remaining string cells (`src/retail_agent/services/safety.py`). The PII set is
 limited to individual identifiers and precise location fields: `email`,
 `first_name`, `last_name`, `street_address`, `postal_code`, `latitude`,
 `longitude`, and `user_geom`; `city`, `state`, and `country` remain analytical
 dimensions. The SQL validator rejects output expressions that reference these
-PII source columns, even through aliases or functions, and asks the model to use
-`user_id` instead (`src/retail_agent/services/sql_validation.py:51`).
+PII source columns, even through aliases or functions, and also rejects whole-row
+PII table aliases used directly, inside `STRUCT(...)`, or inside JSON conversion.
+It asks the model to use `user_id` instead (`src/retail_agent/services/sql_validation.py`).
 `scrub_report` is an email-only safety net after the report LLM
-(`src/retail_agent/services/safety.py:90`).
+(`src/retail_agent/services/safety.py`).
 `mask_question` pre-masks emails before all external question-bearing model calls:
 guard classification, OpenRouter embeddings, SQL generation, and report generation
-(`src/retail_agent/services/safety.py:84`).
+(`src/retail_agent/services/safety.py`).
 
 Production extension: Presidio or another NER layer can be added for names,
 phones, and unstructured text if the dataset or user questions expand beyond the
@@ -493,42 +500,47 @@ thread-level checkpointer, but no persisted user preferences.
 Status: implemented in prototype.
 
 The graph degrades retrieval failure to an empty few-shot list
-(`src/retail_agent/agent/graph.py:187`), retries SQL generation through bounded
-self-correction on validation and execution errors (`src/retail_agent/agent/graph.py:326`,
-`src/retail_agent/agent/graph.py:337`), treats empty valid results as no-data
-(`src/retail_agent/agent/graph.py:339`), and refuses over-budget queries before
-execution (`src/retail_agent/agent/graph.py:247`). LLM and embedding clients carry
-configured retry counts and timeouts (`src/retail_agent/services/llm.py:58`,
-`src/retail_agent/repositories/embeddings.py:24`). The CLI catches failures at the
-interaction boundary and keeps the process alive (`src/retail_agent/cli.py:86`).
+(`src/retail_agent/agent/graph.py`), retries SQL generation through bounded
+self-correction on validation and execution errors (`src/retail_agent/agent/graph.py`,
+`src/retail_agent/agent/graph.py`), treats empty valid results as no-data
+(`src/retail_agent/agent/graph.py`), and refuses over-budget queries before
+execution (`src/retail_agent/agent/graph.py`). LLM and embedding clients carry
+configured retry counts and timeouts (`src/retail_agent/services/llm.py`,
+`src/retail_agent/repositories/embeddings.py`). The CLI catches failures at the
+interaction boundary and keeps the process alive (`src/retail_agent/cli.py`).
 
 ### 6. Quality Assurance
 
 Status: implemented in prototype.
 
 The offline A/B harness reuses the production graph per model slug instead of a
-separate SQL-only shortcut (`src/retail_agent/evaluation/runner.py:157`). It loads a seed
+separate SQL-only shortcut (`src/retail_agent/evaluation/runner.py`). It loads a seed
 set and a physically separate holdout set, then asserts they do not overlap
-(`src/retail_agent/evaluation/io.py:54`). Generated SQL is executed and compared
-against reference SQL with canonicalized rows (`src/retail_agent/evaluation/scoring.py:41`).
+(`src/retail_agent/evaluation/io.py`). Generated SQL is executed and compared
+against reference SQL with canonicalized rows (`src/retail_agent/evaluation/scoring.py`).
 Report quality is judged separately by the fixed judge model
-(`src/retail_agent/evaluation/scoring.py:75`). Ranking is deterministic:
+(`src/retail_agent/evaluation/scoring.py`). Ranking is deterministic:
 correctness descending, 0.05-banded quality descending, mean cost ascending,
-mean latency ascending, model name tie-break (`src/retail_agent/evaluation/ranking.py:37`).
+mean latency ascending, model name tie-break (`src/retail_agent/evaluation/ranking.py`).
 The quality band is the PR-005 guardrail against treating tiny LLM-judge
-differences as signal.
+differences as signal. The ranking table remains accuracy-first; default
+deployment adds an interactive latency-SLA gate after ranking.
 
 | Model | Correctness | Quality | Mean cost | Mean latency |
 |---|---:|---:|---:|---:|
-| `deepseek/deepseek-v4-flash` | 0.800 | 0.633 | 0.000342 | 24.67s |
-| `z-ai/glm-5.2` | 0.800 | 0.635 | 0.006724 | 44.87s |
-| `qwen/qwen3.7-plus` | 0.800 | 0.620 | 0.005896 | 97.48s |
-| `moonshotai/kimi-k2` | 0.550 | 0.585 | 0.001255 | 29.61s |
+| `qwen/qwen3.7-plus` | 0.750 | 0.670 | 0.005827 | 95.34s |
+| `deepseek/deepseek-v4-flash` | 0.700 | 0.635 | 0.000340 | 21.64s |
+| `z-ai/glm-5.2` | 0.650 | 0.605 | 0.005878 | 27.77s |
+| `moonshotai/kimi-k2` | 0.450 | 0.532 | 0.001223 | 24.16s |
 
-The pinned default is `deepseek/deepseek-v4-flash` because it ties on correctness,
-lands in the same quality band as glm, and is materially cheaper and faster.
+The accuracy leader is `qwen/qwen3.7-plus`: 0.750 correctness (15/20).
+The pinned default is `deepseek/deepseek-v4-flash`: it is the most accurate model
+inside the interactive default SLA with 0.700 correctness (14/20), 21.64s mean
+latency, and about 17x lower mean cost than `qwen`. `qwen` is reported as the
+accuracy leader but excluded as an interactive default because 95.34s mean latency
+exceeds the budget.
 
-The winning correctness score is 0.800 (16/20) under a strict subset-by-value
+The leading correctness score is 0.750 (15/20) under a strict subset-by-value
 metric on open-ended analytics questions. Some failed cases are interpretation or
 result-shape differences from the reference SQL rather than agent crashes: the QA
 run recorded stable graph outcomes with no crashes, while judged report quality
@@ -544,11 +556,11 @@ Status: implemented in prototype.
 
 Each run returns and logs a trace with `trace_id`, outcome, latency, tokens, cost
 when available, LLM call count, BigQuery bytes, self-correction iterations, and
-error (`src/retail_agent/services/observability.py:105`,
-`src/retail_agent/services/observability.py:241`). Logs are JSON formatted
-(`src/retail_agent/services/observability.py:59`). Conversation and state replay
+error (`src/retail_agent/services/observability.py`,
+`src/retail_agent/services/observability.py`). Logs are JSON formatted
+(`src/retail_agent/services/observability.py`). Conversation and state replay
 are supported by LangGraph checkpointer storage in Postgres
-(`src/retail_agent/repositories/postgres.py:28`).
+(`src/retail_agent/repositories/postgres.py`).
 
 ### 8. Agility and Persona Management
 
@@ -556,10 +568,10 @@ Status: partially implemented in prototype, production extension documented.
 
 Prompt text is isolated as module constants instead of being embedded in CLI or
 repository code. SQL prompts live in `agent/prompts.py`
-(`src/retail_agent/agent/prompts.py:8`), the report persona lives in
-`services/reporting.py` (`src/retail_agent/services/reporting.py:15`), and the
+(`src/retail_agent/agent/prompts.py`), the report persona lives in
+`services/reporting.py` (`src/retail_agent/services/reporting.py`), and the
 guard classifier prompt lives in `services/safety.py`
-(`src/retail_agent/services/safety.py:162`). This makes persona and wording changes
+(`src/retail_agent/services/safety.py`). This makes persona and wording changes
 localized.
 
 Production extension: move persona prompts and user preference templates into a

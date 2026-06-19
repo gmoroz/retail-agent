@@ -3,7 +3,7 @@
 import math
 from collections.abc import Iterable, Sequence
 
-from retail_agent.const import QUALITY_BAND_EPSILON
+from retail_agent.const import MAX_DEFAULT_LATENCY_SEC, QUALITY_BAND_EPSILON
 from retail_agent.evaluation.models import EvalCaseResult, ModelAggregate
 
 RANKING_RULE = (
@@ -49,6 +49,15 @@ def rank_models(aggregates: Sequence[ModelAggregate]) -> list[ModelAggregate]:
             aggregate.model,
         ),
     )
+
+
+def select_pinned_default_model(aggregates: Sequence[ModelAggregate]) -> ModelAggregate | None:
+    """Return the first PR-005-ranked model within the interactive latency SLA."""
+
+    for aggregate in rank_models(aggregates):
+        if aggregate.mean_latency_sec <= MAX_DEFAULT_LATENCY_SEC:
+            return aggregate
+    return None
 
 
 def _mean(values: Iterable[float]) -> float:

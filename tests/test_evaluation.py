@@ -1,20 +1,24 @@
 """Unit tests for offline eval comparison, ranking and holdout integrity."""
 
 import os
+from pathlib import Path
 
 import pandas as pd
 import pytest
 
-from retail_agent.const import AB_MODELS
+from retail_agent.const import AB_MODELS, MAX_DEFAULT_LATENCY_SEC, PINNED_DEFAULT_MODEL
 from retail_agent.evaluation import (
     ModelAggregate,
+    aggregate_model_results,
     assert_seed_and_holdout_disjoint,
     compare_result_sets,
     load_golden_questions,
     load_seed_trios,
     rank_models,
     run_eval,
+    select_pinned_default_model,
 )
+from retail_agent.evaluation.io import read_eval_report
 from retail_agent.services.text_utils import content_to_text, extract_json_object
 
 
@@ -217,6 +221,85 @@ def test_rank_models_uses_quality_when_difference_exceeds_judge_noise_band() -> 
     ranked = rank_models(aggregates)
 
     assert [aggregate.model for aggregate in ranked] == ["better_quality", "cheaper"]
+
+
+def test_select_pinned_default_model_skips_accuracy_leader_when_latency_exceeds_sla() -> None:
+    aggregates = [
+        ModelAggregate(
+            model="accurate_too_slow",
+            questions=20,
+            mean_correctness=0.95,
+            mean_quality=0.80,
+            total_cost=0.20,
+            mean_cost=0.0100,
+            mean_latency_sec=MAX_DEFAULT_LATENCY_SEC + 1.0,
+            total_tokens=1000,
+        ),
+        ModelAggregate(
+            model="interactive_runner_up",
+            questions=20,
+            mean_correctness=0.90,
+            mean_quality=0.70,
+            total_cost=0.10,
+            mean_cost=0.0050,
+            mean_latency_sec=MAX_DEFAULT_LATENCY_SEC,
+            total_tokens=1000,
+        ),
+        ModelAggregate(
+            model="less_correct_interactive",
+            questions=20,
+            mean_correctness=0.80,
+            mean_quality=0.90,
+            total_cost=0.01,
+            mean_cost=0.0005,
+            mean_latency_sec=10.0,
+            total_tokens=1000,
+        ),
+    ]
+
+    selected = select_pinned_default_model(aggregates)
+
+    assert selected is not None
+    assert selected.model == "interactive_runner_up"
+
+
+def test_select_pinned_default_model_keeps_accuracy_leader_when_all_models_fit_sla() -> None:
+    aggregates = [
+        ModelAggregate(
+            model="accurate_interactive",
+            questions=20,
+            mean_correctness=0.95,
+            mean_quality=0.80,
+            total_cost=0.20,
+            mean_cost=0.0100,
+            mean_latency_sec=MAX_DEFAULT_LATENCY_SEC,
+            total_tokens=1000,
+        ),
+        ModelAggregate(
+            model="runner_up_interactive",
+            questions=20,
+            mean_correctness=0.90,
+            mean_quality=0.90,
+            total_cost=0.01,
+            mean_cost=0.0005,
+            mean_latency_sec=10.0,
+            total_tokens=1000,
+        ),
+    ]
+
+    selected = select_pinned_default_model(aggregates)
+
+    assert selected is not None
+    assert selected.model == "accurate_interactive"
+
+
+def test_pinned_default_constant_matches_saved_eval_sla_selection() -> None:
+    report = read_eval_report(Path("eval/results.json"))
+
+    selected = select_pinned_default_model(aggregate_model_results(report.cases))
+
+    assert selected is not None
+    assert selected.model == PINNED_DEFAULT_MODEL
 
 
 def test_judge_json_helper_extracts_first_balanced_object() -> None:

@@ -20,7 +20,12 @@ from retail_agent.evaluation.io import (
 )
 from retail_agent.evaluation.models import EvalCaseResult, EvalReport, GoldenQuestion
 from retail_agent.evaluation.paths import DEFAULT_GOLDEN_SET_PATH, DEFAULT_RESULTS_JSON_PATH, DEFAULT_RESULTS_MD_PATH
-from retail_agent.evaluation.ranking import RANKING_RULE, aggregate_model_results, rank_models
+from retail_agent.evaluation.ranking import (
+    RANKING_RULE,
+    aggregate_model_results,
+    rank_models,
+    select_pinned_default_model,
+)
 from retail_agent.evaluation.report import render_markdown_report
 from retail_agent.evaluation.scoring import compare_result_sets, judge_report
 from retail_agent.exceptions import RetailAgentError
@@ -54,12 +59,14 @@ def run_eval(
         for question in selected_questions:
             cases.append(_run_case(model_slug, question))
 
-    ranked = rank_models(aggregate_model_results(cases))
+    aggregates = aggregate_model_results(cases)
+    ranked = rank_models(aggregates)
+    pinned_default = select_pinned_default_model(aggregates)
     report = EvalReport(
         generated_at=datetime.utcnow().isoformat(timespec="seconds") + "Z",
         ranking_rule=RANKING_RULE,
         winner=ranked[0].model if ranked else None,
-        pinned_default=ranked[0].model if ranked else None,
+        pinned_default=pinned_default.model if pinned_default is not None else None,
         aggregates=list(ranked),
         cases=cases,
     )
@@ -76,12 +83,14 @@ def rerank_eval_results(
     """Rebuild eval artifacts from saved case rows without running the eval graph."""
 
     report = read_eval_report(source_json_path)
-    ranked = rank_models(aggregate_model_results(report.cases))
+    aggregates = aggregate_model_results(report.cases)
+    ranked = rank_models(aggregates)
+    pinned_default = select_pinned_default_model(aggregates)
     reranked = EvalReport(
         generated_at=report.generated_at,
         ranking_rule=RANKING_RULE,
         winner=ranked[0].model if ranked else None,
-        pinned_default=ranked[0].model if ranked else None,
+        pinned_default=pinned_default.model if pinned_default is not None else None,
         aggregates=list(ranked),
         cases=report.cases,
     )

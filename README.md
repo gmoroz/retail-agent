@@ -2,7 +2,7 @@
 
 CLI chat agent for retail analytics. It answers natural-language questions over
 the public BigQuery dataset `bigquery-public-data.thelook_ecommerce`, using
-LangGraph for orchestration, OpenRouter chat with the pinned A/B winner
+LangGraph for orchestration, OpenRouter chat with the pinned SLA-aware default
 `deepseek/deepseek-v4-flash`, and OpenRouter embeddings (`baai/bge-m3`).
 
 See [docs/architecture.md](docs/architecture.md) for the high-level design,
@@ -65,17 +65,22 @@ A real OpenRouter/deepseek run is captured in
 
 ## A/B selection
 
-The full 4x20 eval artifact is [eval/results.md](eval/results.md). Ranking uses
-correctness first, then report-quality bands with a 0.05 LLM-judge noise floor,
-then mean cost and mean latency. That PR-005 rule treats `glm` and `deepseek`
-quality as tied on this run, so the cheaper and faster model wins.
+The human-readable 4x20 eval ranking is [eval/results.md](eval/results.md). Full
+per-case details, including generated SQL and judge reasons, are stored in
+[eval/results.json](eval/results.json). Ranking uses correctness first, then
+report-quality bands with a 0.05 LLM-judge noise floor, then mean cost and mean
+latency. That PR-005 rule keeps `qwen/qwen3.7-plus` as the accuracy leader, but
+the deployed CLI default must fit the interactive latency SLA (`<=45s` mean
+latency). `qwen` is one holdout question more correct than `deepseek`, but is
+about 4.4x slower and 17x more expensive on mean cost, so
+`deepseek/deepseek-v4-flash` remains the pinned default.
 
 | Model | Correctness | Quality | Mean cost | Mean latency |
 |---|---:|---:|---:|---:|
-| `deepseek/deepseek-v4-flash` | 0.800 | 0.633 | 0.000342 | 24.67s |
-| `z-ai/glm-5.2` | 0.800 | 0.635 | 0.006724 | 44.87s |
-| `qwen/qwen3.7-plus` | 0.800 | 0.620 | 0.005896 | 97.48s |
-| `moonshotai/kimi-k2` | 0.550 | 0.585 | 0.001255 | 29.61s |
+| `qwen/qwen3.7-plus` | 0.750 | 0.670 | 0.005827 | 95.34s |
+| `deepseek/deepseek-v4-flash` | 0.700 | 0.635 | 0.000340 | 21.64s |
+| `z-ai/glm-5.2` | 0.650 | 0.605 | 0.005878 | 27.77s |
+| `moonshotai/kimi-k2` | 0.450 | 0.532 | 0.001223 | 24.16s |
 
 ## Development
 

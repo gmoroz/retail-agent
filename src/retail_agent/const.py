@@ -74,6 +74,9 @@ LLM_REQUEST_TIMEOUT_SEC = 60.0
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 PINNED_DEFAULT_MODEL = "deepseek/deepseek-v4-flash"
 QUALITY_BAND_EPSILON = 0.05
+# The deployed default serves interactive CLI requests; 95s qwen latency is too slow,
+# while 45s keeps deepseek/glm/kimi eligible.
+MAX_DEFAULT_LATENCY_SEC = 45.0
 
 AB_MODELS: tuple[str, ...] = (
     PINNED_DEFAULT_MODEL,

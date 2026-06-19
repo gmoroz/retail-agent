@@ -22,7 +22,7 @@ from retail_agent.evaluation.paths import (
     DEFAULT_RESULTS_MD_PATH,
     DEFAULT_SEED_PATH,
 )
-from retail_agent.evaluation.ranking import aggregate_model_results, rank_models
+from retail_agent.evaluation.ranking import aggregate_model_results, rank_models, select_pinned_default_model
 from retail_agent.evaluation.report import render_markdown_report
 from retail_agent.evaluation.runner import rerank_eval_results, run_eval
 from retail_agent.evaluation.scoring import compare_result_sets
@@ -51,4 +51,5 @@ __all__ = [
     "render_markdown_report",
     "rerank_eval_results",
     "run_eval",
+    "select_pinned_default_model",
 ]
