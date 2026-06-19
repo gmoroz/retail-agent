@@ -1,0 +1,52 @@
+[
+  {
+    "question": "How much completed item revenue comes from each order status?",
+    "sql": "SELECT o.status AS order_status, ROUND(SUM(oi.sale_price), 2) AS revenue FROM `bigquery-public-data.thelook_ecommerce.orders` AS o JOIN `bigquery-public-data.thelook_ecommerce.order_items` AS oi ON oi.order_id = o.order_id WHERE oi.status = 'Complete' GROUP BY order_status ORDER BY revenue DESC, order_status ASC",
+    "report": "Completed item revenue is grouped by order status so managers can see where paid sales concentrate across the order lifecycle."
+  },
+  {
+    "question": "Which brands have the highest completed sales revenue?",
+    "sql": "SELECT p.brand, ROUND(SUM(oi.sale_price), 2) AS revenue, COUNT(*) AS units_sold FROM `bigquery-public-data.thelook_ecommerce.order_items` AS oi JOIN `bigquery-public-data.thelook_ecommerce.products` AS p ON p.id = oi.product_id WHERE oi.status = 'Complete' AND p.brand IS NOT NULL GROUP BY p.brand ORDER BY revenue DESC, units_sold DESC, p.brand ASC LIMIT 10",
+    "report": "The report highlights the ten brands with the largest completed sales revenue and includes units sold to separate premium-price brands from high-volume brands."
+  },
+  {
+    "question": "What was monthly completed revenue during 2024?",
+    "sql": "SELECT DATE(TIMESTAMP_TRUNC(oi.created_at, MONTH)) AS month, ROUND(SUM(oi.sale_price), 2) AS revenue FROM `bigquery-public-data.thelook_ecommerce.order_items` AS oi WHERE oi.status = 'Complete' AND oi.created_at >= TIMESTAMP('2024-01-01') AND oi.created_at < TIMESTAMP('2025-01-01') GROUP BY month ORDER BY month ASC",
+    "report": "Monthly completed revenue for 2024 shows the year trend in chronological order."
+  },
+  {
+    "question": "How many items does the average order contain by customer gender?",
+    "sql": "SELECT gender, ROUND(AVG(num_of_item), 2) AS average_items_per_order, COUNT(*) AS orders FROM `bigquery-public-data.thelook_ecommerce.orders` GROUP BY gender ORDER BY average_items_per_order DESC, gender ASC",
+    "report": "Average items per order is compared by gender, with order count included as context for sample size."
+  },
+  {
+    "question": "Which product categories have the highest returned-item rate?",
+    "sql": "SELECT p.category, COUNTIF(oi.status = 'Returned') AS returned_items, COUNT(*) AS total_items, ROUND(SAFE_DIVIDE(COUNTIF(oi.status = 'Returned'), COUNT(*)), 4) AS return_rate FROM `bigquery-public-data.thelook_ecommerce.order_items` AS oi JOIN `bigquery-public-data.thelook_ecommerce.products` AS p ON p.id = oi.product_id GROUP BY p.category ORDER BY return_rate DESC, returned_items DESC, p.category ASC LIMIT 10",
+    "report": "The categories are ranked by returned-item rate, with raw returned and total item counts to make the rate interpretable."
+  },
+  {
+    "question": "How many users came from each traffic source?",
+    "sql": "SELECT traffic_source, COUNT(*) AS users FROM `bigquery-public-data.thelook_ecommerce.users` GROUP BY traffic_source ORDER BY users DESC, traffic_source ASC",
+    "report": "User acquisition is summarized by traffic source so the largest channels are visible first."
+  },
+  {
+    "question": "What order statuses exist and how often does each occur?",
+    "sql": "SELECT status, COUNT(*) AS orders FROM `bigquery-public-data.thelook_ecommerce.orders` GROUP BY status ORDER BY orders DESC, status ASC",
+    "report": "Order statuses are listed with counts, giving a compact view of the operational states present in the data."
+  },
+  {
+    "question": "How many customers placed their first order in each month of 2024?",
+    "sql": "WITH first_orders AS (SELECT user_id, MIN(created_at) AS first_order_at FROM `bigquery-public-data.thelook_ecommerce.orders` GROUP BY user_id) SELECT DATE(TIMESTAMP_TRUNC(first_order_at, MONTH)) AS first_order_month, COUNT(*) AS customers FROM first_orders WHERE first_order_at >= TIMESTAMP('2024-01-01') AND first_order_at < TIMESTAMP('2025-01-01') GROUP BY first_order_month ORDER BY first_order_month ASC",
+    "report": "First-order customers are counted by month for 2024 to show new buyer acquisition over time."
+  },
+  {
+    "question": "How are products distributed across retail price bands?",
+    "sql": "SELECT CASE WHEN retail_price < 25 THEN 'under_25' WHEN retail_price < 50 THEN '25_to_49' WHEN retail_price < 100 THEN '50_to_99' ELSE '100_plus' END AS price_band, COUNT(*) AS products, ROUND(AVG(retail_price), 2) AS average_retail_price FROM `bigquery-public-data.thelook_ecommerce.products` GROUP BY price_band ORDER BY CASE price_band WHEN 'under_25' THEN 1 WHEN '25_to_49' THEN 2 WHEN '50_to_99' THEN 3 ELSE 4 END",
+    "report": "Products are grouped into price bands with average retail price to show catalog positioning."
+  },
+  {
+    "question": "What is the average delivery time by shipment month?",
+    "sql": "SELECT DATE(TIMESTAMP_TRUNC(shipped_at, MONTH)) AS shipped_month, ROUND(AVG(TIMESTAMP_DIFF(delivered_at, shipped_at, HOUR)) / 24, 2) AS average_delivery_days, COUNT(*) AS delivered_orders FROM `bigquery-public-data.thelook_ecommerce.orders` WHERE shipped_at IS NOT NULL AND delivered_at IS NOT NULL GROUP BY shipped_month ORDER BY shipped_month ASC LIMIT 24",
+    "report": "Average delivery time is shown by shipment month, using only orders with both shipped and delivered timestamps."
+  }
+]

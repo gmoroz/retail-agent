@@ -1,0 +1,122 @@
+[
+  {
+    "id": "holdout_001",
+    "category": "customer_behavior",
+    "question": "Who are the top 10 customers by completed item spend?",
+    "reference_sql": "SELECT user_id, ROUND(SUM(sale_price), 2) AS total_spend FROM `bigquery-public-data.thelook_ecommerce.order_items` WHERE status = 'Complete' GROUP BY user_id ORDER BY total_spend DESC, user_id ASC LIMIT 10"
+  },
+  {
+    "id": "holdout_002",
+    "category": "product_performance",
+    "question": "Which product categories generated the most completed revenue in 2023?",
+    "reference_sql": "SELECT p.category, ROUND(SUM(oi.sale_price), 2) AS completed_revenue FROM `bigquery-public-data.thelook_ecommerce.order_items` AS oi JOIN `bigquery-public-data.thelook_ecommerce.products` AS p ON p.id = oi.product_id WHERE oi.status = 'Complete' AND oi.created_at >= TIMESTAMP('2023-01-01') AND oi.created_at < TIMESTAMP('2024-01-01') GROUP BY p.category ORDER BY completed_revenue DESC, p.category ASC LIMIT 10"
+  },
+  {
+    "id": "holdout_003",
+    "category": "time_based",
+    "question": "Show completed revenue by month in 2024.",
+    "reference_sql": "SELECT DATE(TIMESTAMP_TRUNC(created_at, MONTH)) AS month, ROUND(SUM(sale_price), 2) AS completed_revenue FROM `bigquery-public-data.thelook_ecommerce.order_items` WHERE status = 'Complete' AND created_at >= TIMESTAMP('2024-01-01') AND created_at < TIMESTAMP('2025-01-01') GROUP BY month ORDER BY month ASC"
+  },
+  {
+    "id": "holdout_004",
+    "category": "time_based",
+    "question": "What was average order value by month in 2024 for completed items?",
+    "reference_sql": "SELECT DATE(TIMESTAMP_TRUNC(created_at, MONTH)) AS month, ROUND(SAFE_DIVIDE(SUM(sale_price), COUNT(DISTINCT order_id)), 2) AS average_order_value FROM `bigquery-public-data.thelook_ecommerce.order_items` WHERE status = 'Complete' AND created_at >= TIMESTAMP('2024-01-01') AND created_at < TIMESTAMP('2025-01-01') GROUP BY month ORDER BY month ASC"
+  },
+  {
+    "id": "holdout_005",
+    "category": "comparison",
+    "question": "Compare completed revenue between the Men and Women departments.",
+    "reference_sql": "SELECT p.department, ROUND(SUM(oi.sale_price), 2) AS completed_revenue FROM `bigquery-public-data.thelook_ecommerce.order_items` AS oi JOIN `bigquery-public-data.thelook_ecommerce.products` AS p ON p.id = oi.product_id WHERE oi.status = 'Complete' AND p.department IN ('Men', 'Women') GROUP BY p.department ORDER BY completed_revenue DESC, p.department ASC"
+  },
+  {
+    "id": "holdout_006",
+    "category": "repeat_customers",
+    "question": "How many customers have placed more than one order?",
+    "reference_sql": "WITH customer_orders AS (SELECT user_id, COUNT(DISTINCT order_id) AS order_count FROM `bigquery-public-data.thelook_ecommerce.orders` GROUP BY user_id) SELECT COUNTIF(order_count > 1) AS repeat_customers FROM customer_orders"
+  },
+  {
+    "id": "holdout_007",
+    "category": "db_structure",
+    "question": "Which order status values are present in the orders table?",
+    "reference_sql": "SELECT DISTINCT status FROM `bigquery-public-data.thelook_ecommerce.orders` ORDER BY status ASC"
+  },
+  {
+    "id": "holdout_008",
+    "category": "db_structure",
+    "question": "Which product departments are available?",
+    "reference_sql": "SELECT DISTINCT department FROM `bigquery-public-data.thelook_ecommerce.products` ORDER BY department ASC"
+  },
+  {
+    "id": "holdout_009",
+    "category": "customer_behavior",
+    "question": "Which countries have the most completed item revenue?",
+    "reference_sql": "SELECT u.country, ROUND(SUM(oi.sale_price), 2) AS completed_revenue FROM `bigquery-public-data.thelook_ecommerce.users` AS u JOIN `bigquery-public-data.thelook_ecommerce.order_items` AS oi ON oi.user_id = u.id WHERE oi.status = 'Complete' GROUP BY u.country ORDER BY completed_revenue DESC, u.country ASC LIMIT 10"
+  },
+  {
+    "id": "holdout_010",
+    "category": "product_performance",
+    "question": "Which categories have the highest return rate?",
+    "reference_sql": "SELECT p.category, ROUND(SAFE_DIVIDE(COUNTIF(oi.status = 'Returned'), COUNT(*)), 4) AS return_rate FROM `bigquery-public-data.thelook_ecommerce.order_items` AS oi JOIN `bigquery-public-data.thelook_ecommerce.products` AS p ON p.id = oi.product_id GROUP BY p.category ORDER BY return_rate DESC, p.category ASC LIMIT 10"
+  },
+  {
+    "id": "holdout_011",
+    "category": "customer_behavior",
+    "question": "Which cities have the largest customer counts?",
+    "reference_sql": "SELECT city, COUNT(*) AS customers FROM `bigquery-public-data.thelook_ecommerce.users` GROUP BY city ORDER BY customers DESC, city ASC LIMIT 10"
+  },
+  {
+    "id": "holdout_012",
+    "category": "time_based",
+    "question": "How many orders were created each day in January 2024?",
+    "reference_sql": "SELECT DATE(created_at) AS order_date, COUNT(*) AS orders FROM `bigquery-public-data.thelook_ecommerce.orders` WHERE created_at >= TIMESTAMP('2024-01-01') AND created_at < TIMESTAMP('2024-02-01') GROUP BY order_date ORDER BY order_date ASC"
+  },
+  {
+    "id": "holdout_013",
+    "category": "product_performance",
+    "question": "What is the average completed sale price by category?",
+    "reference_sql": "SELECT p.category, ROUND(AVG(oi.sale_price), 2) AS average_completed_sale_price FROM `bigquery-public-data.thelook_ecommerce.order_items` AS oi JOIN `bigquery-public-data.thelook_ecommerce.products` AS p ON p.id = oi.product_id WHERE oi.status = 'Complete' GROUP BY p.category ORDER BY average_completed_sale_price DESC, p.category ASC LIMIT 10"
+  },
+  {
+    "id": "holdout_014",
+    "category": "time_based",
+    "question": "How many new users signed up by month in 2024?",
+    "reference_sql": "SELECT DATE(TIMESTAMP_TRUNC(created_at, MONTH)) AS signup_month, COUNT(*) AS new_users FROM `bigquery-public-data.thelook_ecommerce.users` WHERE created_at >= TIMESTAMP('2024-01-01') AND created_at < TIMESTAMP('2025-01-01') GROUP BY signup_month ORDER BY signup_month ASC"
+  },
+  {
+    "id": "holdout_015",
+    "category": "time_based",
+    "question": "What order statuses were created by month in 2024?",
+    "reference_sql": "SELECT DATE(TIMESTAMP_TRUNC(created_at, MONTH)) AS order_month, status, COUNT(*) AS orders FROM `bigquery-public-data.thelook_ecommerce.orders` WHERE created_at >= TIMESTAMP('2024-01-01') AND created_at < TIMESTAMP('2025-01-01') GROUP BY order_month, status ORDER BY order_month ASC, status ASC"
+  },
+  {
+    "id": "holdout_016",
+    "category": "product_performance",
+    "question": "Which brands have the highest average product margin?",
+    "reference_sql": "SELECT brand, ROUND(AVG(retail_price - cost), 2) AS average_margin FROM `bigquery-public-data.thelook_ecommerce.products` WHERE brand IS NOT NULL GROUP BY brand ORDER BY average_margin DESC, brand ASC LIMIT 10"
+  },
+  {
+    "id": "holdout_017",
+    "category": "repeat_customers",
+    "question": "What repeat purchase rate do we see by traffic source?",
+    "reference_sql": "WITH customer_orders AS (SELECT user_id, COUNT(DISTINCT order_id) AS order_count FROM `bigquery-public-data.thelook_ecommerce.orders` GROUP BY user_id) SELECT u.traffic_source, ROUND(SAFE_DIVIDE(COUNTIF(co.order_count > 1), COUNT(*)), 4) AS repeat_rate FROM customer_orders AS co JOIN `bigquery-public-data.thelook_ecommerce.users` AS u ON u.id = co.user_id GROUP BY u.traffic_source ORDER BY repeat_rate DESC, u.traffic_source ASC"
+  },
+  {
+    "id": "holdout_018",
+    "category": "comparison",
+    "question": "Compare average order value for California and New York.",
+    "reference_sql": "SELECT u.state, ROUND(SAFE_DIVIDE(SUM(oi.sale_price), COUNT(DISTINCT oi.order_id)), 2) AS average_order_value FROM `bigquery-public-data.thelook_ecommerce.users` AS u JOIN `bigquery-public-data.thelook_ecommerce.order_items` AS oi ON oi.user_id = u.id WHERE oi.status = 'Complete' AND u.state IN ('California', 'New York') GROUP BY u.state ORDER BY average_order_value DESC, u.state ASC"
+  },
+  {
+    "id": "holdout_019",
+    "category": "product_performance",
+    "question": "Which products sold the most completed units?",
+    "reference_sql": "SELECT p.id AS product_id, COUNT(*) AS completed_units FROM `bigquery-public-data.thelook_ecommerce.order_items` AS oi JOIN `bigquery-public-data.thelook_ecommerce.products` AS p ON p.id = oi.product_id WHERE oi.status = 'Complete' GROUP BY product_id ORDER BY completed_units DESC, product_id ASC LIMIT 10"
+  },
+  {
+    "id": "holdout_020",
+    "category": "customer_behavior",
+    "question": "How does completed spend vary by customer age band?",
+    "reference_sql": "SELECT CASE WHEN u.age < 25 THEN 'under_25' WHEN u.age < 35 THEN '25_to_34' WHEN u.age < 45 THEN '35_to_44' WHEN u.age < 55 THEN '45_to_54' ELSE '55_plus' END AS age_band, ROUND(SUM(oi.sale_price), 2) AS completed_spend FROM `bigquery-public-data.thelook_ecommerce.users` AS u JOIN `bigquery-public-data.thelook_ecommerce.order_items` AS oi ON oi.user_id = u.id WHERE oi.status = 'Complete' GROUP BY age_band ORDER BY CASE age_band WHEN 'under_25' THEN 1 WHEN '25_to_34' THEN 2 WHEN '35_to_44' THEN 3 WHEN '45_to_54' THEN 4 ELSE 5 END"
+  }
+]
